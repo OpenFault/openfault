@@ -7,7 +7,7 @@
 <div class="form-col">
 <section class="card sec">
   <h2>Webhooks</h2>
-  {% if hooks.is_empty() %}<p class="muted">No webhooks yet. Add one below to post new issues, regressions and spikes to Slack, Discord or any JSON endpoint.</p>{% else %}
+  {% if hooks.is_empty() %}<p class="muted">No webhooks yet. Add one below to post new issues, regressions and spikes to Slack, Discord, Mattermost, Teams, Telegram or any JSON endpoint.</p>{% else %}
   <div class="tbl"><table class="rt">
   <thead><tr><th>Kind</th><th>URL</th><th>Enabled</th><th>Last OK</th><th>Last error</th><th>Secret</th><th></th></tr></thead>
   <tbody>
@@ -28,8 +28,8 @@
   <h3>Add webhook</h3>
   {% if let Some(e) = error %}<p class="error" role="alert">{{ e }}</p>{% endif %}
   <form method="post" action="/settings/projects/{{ project.slug }}/webhooks" class="stack">
-    <label>Kind <select name="kind">{% for k in ["slack", "discord", "generic"] %}<option value="{{ k }}"{% if kind == **k %} selected{% endif %}>{{ k }}</option>{% endfor %}</select></label>
-    <label>URL <input name="url" type="url" value="{{ url }}" placeholder="https://hooks.slack.com/services/…" required></label>
+    <label>Kind <select name="kind">{% for k in ["slack", "discord", "mattermost", "teams", "telegram", "generic"] %}<option value="{{ k }}"{% if kind == **k %} selected{% endif %}>{{ k }}</option>{% endfor %}</select></label>
+    <label>URL <input name="url" type="url" value="{{ url }}" placeholder="https://hooks.slack.com/services/…" required><span class="hint">Telegram: <code>https://api.telegram.org/bot&lt;token&gt;/sendMessage?chat_id=&lt;chat id&gt;</code> (the chat id is stored separately).</span></label>
     <label>Secret <input name="secret" type="password" autocomplete="off" placeholder="Optional"><span class="hint">Generic webhooks get an HMAC-SHA256 signature header when set.</span></label>
     <button>{{ crate::ui::icon("plus")|safe }}Add webhook</button>
   </form>

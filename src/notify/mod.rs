@@ -41,20 +41,18 @@ impl Notification {
             kind,
             title: title.to_string(),
             level: level.to_string(),
-            url: issue_url(issue_id),
+            url: format!("/issues/{issue_id}"),
         }
     }
 }
 
-/// OPENFAULT_BASE_URL without the trailing slash. ponytail: localhost fallback for dev; main.rs requires it with SMTP.
-pub fn base_url() -> String {
-    std::env::var("OPENFAULT_BASE_URL")
-        .map(|u| u.trim_end_matches('/').to_string())
-        .unwrap_or_else(|_| "http://localhost:8080".into())
+/// Configured base URL (settings or OPENFAULT_BASE_URL). ponytail: localhost fallback for dev.
+pub fn base_url(db: &Db) -> String {
+    crate::config::base_or(db, None)
 }
 
-pub fn issue_url(id: i64) -> String {
-    format!("{}/issues/{id}", base_url())
+fn base_from(c: &Connection) -> String {
+    crate::config::base(&crate::config::load(c)).unwrap_or_else(|| "http://localhost:8080".into())
 }
 
 pub fn label(kind: &str) -> &'static str {
@@ -71,7 +69,9 @@ pub fn label(kind: &str) -> &'static str {
 /// Bounded: past MAX_PENDING undelivered rows per project (a flood of new issues, a dead SMTP
 /// server) new triggers are dropped with a warning instead of growing the queue.
 pub fn enqueue(c: &Connection, n: &Notification) -> rusqlite::Result<()> {
-    let payload = json!({"title": n.title, "level": n.level, "url": n.url}).to_string();
+    // ponytail: settings read per trigger (one row); only new issues/regressions/spikes get here.
+    let url = format!("{}{}", base_from(c), n.url);
+    let payload = json!({"title": n.title, "level": n.level, "url": url}).to_string();
     let added = c.execute(
         "INSERT INTO notif_queue (project_id, issue_id, kind, payload_json, created_at) SELECT ?1, ?2, ?3, ?4, ?5
          WHERE (SELECT count(*) FROM notif_queue WHERE project_id = ?1 AND done_at IS NULL AND attempts < ?6) < ?7",
@@ -137,6 +137,7 @@ pub fn migrate(c: &Connection) -> rusqlite::Result<()> {
         ("issues", "last_spike_at", "INTEGER"),
         ("webhooks", "secret", "TEXT"),
         ("webhooks", "last_ok_at", "INTEGER"),
+        ("webhooks", "extra", "TEXT"),
         ("devices", "name", "TEXT"),
         ("devices", "token_id", "INTEGER"),
         ("projects", "notif_dropped", "INTEGER NOT NULL DEFAULT 0"),
@@ -334,7 +335,7 @@ fn load(
         )
         .optional()?;
     let Some(info) = info else { return Ok(None) };
-    // project access = ui::VISIBLE: admins/owner see all, members via project_members.
+    // project access = ui::VISIBLE: admins/owner see all, members via project_access (direct ∪ teams).
     let pref = |col: &str| {
         format!(
             "coalesce((SELECT {col} FROM notif_prefs WHERE user_id = u.id AND project_id = ?1 AND kind = ?2 LIMIT 1),
@@ -344,7 +345,7 @@ fn load(
     let users: Vec<Recipient> = c
         .prepare(&format!(
             "SELECT u.id, u.email, {}, {} FROM users u
-             WHERE u.role != 'member' OR u.is_owner = 1 OR u.id IN (SELECT user_id FROM project_members WHERE project_id = ?1)",
+             WHERE u.role != 'member' OR u.is_owner = 1 OR u.id IN (SELECT user_id FROM project_access WHERE project_id = ?1)",
             pref("email"),
             pref("push")
         ))?
@@ -441,13 +442,13 @@ async fn deliver(
     let mut sent: Vec<(i64, String)> = vec![];
     let mut errs: Vec<String> = vec![];
 
-    if crate::mail::configured() || cfg!(debug_assertions) {
+    if crate::mail::configured(db) || cfg!(debug_assertions) {
         for u in ctx
             .users
             .iter()
             .filter(|u| u.email_on && !done(u.id, "email"))
         {
-            match email::send(&ctx.info, &u.email).await {
+            match email::send(db, &ctx.info, &u.email).await {
                 Ok(()) => sent.push((u.id, "email".into())),
                 Err(e) => errs.push(format!("email to {}: {e}", u.email)),
             }
@@ -460,7 +461,7 @@ async fn deliver(
         .iter()
         .filter(|(uid, _)| !done(*uid, "push"))
         .collect();
-    if let Some(relay) = push::relay()
+    if let Some(relay) = push::relay(db)
         && !toks.is_empty()
     {
         let list: Vec<String> = toks.iter().map(|t| t.1.clone()).collect();
@@ -534,6 +535,7 @@ async fn deliver(
 pub fn purge(c: &Connection, t: i64) -> rusqlite::Result<()> {
     c.execute("DELETE FROM notif_queue WHERE created_at < ?1", [t - 86400])?;
     c.execute("DELETE FROM notif_sent WHERE sent_at < ?1", [t - 86400])?;
+    c.execute("DELETE FROM mail_log WHERE created_at < ?1", [t - 86400])?;
     Ok(())
 }
 

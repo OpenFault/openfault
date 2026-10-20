@@ -5,11 +5,11 @@
 {% include "settings_nav.html" %}
 <div class="form-col">
 <div class="tbl"><table class="rt">
-<thead><tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr></thead>
+<thead><tr><th>Name</th><th>Email</th><th>Teams</th><th>Role</th><th></th></tr></thead>
 <tbody>
 {% for m in users %}
 <tr>
-  <td><span class="avatar s">{{ crate::ui::initials(m.name, m.email) }}</span> {{ m.name }}</td><td class="muted">{{ m.email }}</td>
+  <td><span class="avatar s">{{ crate::ui::initials(m.name, m.email) }}</span> {{ m.name }}</td><td class="muted">{{ m.email }}</td><td class="muted">{{ m.teams }}</td>
   <td>{% if m.role == "owner" %}<span class="pill">owner</span>{% else %}
     <form method="post" action="/settings/members/{{ m.id }}/role" class="inline">
       <select name="role" aria-label="Role">{% for r in ["admin", "member"] %}<option{% if *r == m.role.as_str() %} selected{% endif %}>{{ r }}</option>{% endfor %}</select>
@@ -23,8 +23,8 @@
 <h2>Pending invites</h2>
 {% if invites.is_empty() %}<p class="muted">No pending invites.</p>{% else %}
 <div class="tbl"><table class="rt">
-<thead><tr><th>Email</th><th>Role</th><th>Expires</th><th></th></tr></thead>
-<tbody>{% for i in invites %}<tr><td>{{ i.email }}</td><td>{{ i.role }}</td><td class="muted" title="{{ crate::ui::abs(i.expires_at) }}">{{ crate::ui::abs(i.expires_at) }}</td>
+<thead><tr><th>Email</th><th>Role</th><th>Access</th><th>Expires</th><th></th></tr></thead>
+<tbody>{% for i in invites %}<tr><td>{{ i.email }}</td><td>{{ i.role }}</td><td class="muted">{{ i.access }}</td><td class="muted" title="{{ crate::ui::abs(i.expires_at) }}">{{ crate::ui::abs(i.expires_at) }}</td>
 <td class="num"><form method="post" action="/settings/members/invites/{{ i.hash }}/revoke" class="inline"><button class="ghost sm danger">Revoke</button></form></td></tr>{% endfor %}</tbody>
 </table></div>{% endif %}
 <section class="card sec">
@@ -36,7 +36,11 @@
 <form method="post" action="/settings/members/invite" class="stack">
   <label>Email <input name="email" type="email" required></label>
   <label>Role <select name="role"><option>member</option><option>admin</option></select></label>
-  <fieldset><legend>Projects (members only see these)</legend>
+  {% if !teams.is_empty() %}<fieldset><legend>Teams (members see the team's projects)</legend>
+  {% for t in teams %}<div style="display:flex;gap:8px;align-items:center;justify-content:space-between"><label class="check"><input type="checkbox" name="t" value="{{ t.id }}"> {{ t.name }}</label>
+  <select name="tr:{{ t.id }}" aria-label="Role in {{ t.name }}"><option>member</option><option>admin</option></select></div>{% endfor %}
+  </fieldset>{% endif %}
+  <fieldset><legend>Projects (direct access)</legend>
   {% for p in projects %}<label class="check"><input type="checkbox" name="p" value="{{ p.id }}"> {{ p.name }}</label>{% endfor %}
   </fieldset>
   <button>Send invite</button>

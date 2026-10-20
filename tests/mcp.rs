@@ -66,7 +66,7 @@ async fn mcp_round_trip() {
 
     let (_, v) = rpc(&t, ADMIN_W, 2, "tools/list", json!({})).await;
     let names = tool_names(&v);
-    assert_eq!(names.len(), 10, "{names:?}");
+    assert_eq!(names.len(), 19, "{names:?}"); // 10 + 6 admin onboarding + 3 team tools
     let get = v["result"]["tools"]
         .as_array()
         .unwrap()
@@ -89,7 +89,7 @@ async fn mcp_round_trip() {
     );
     let (_, v) = rpc(&t, ADMIN_R, 3, "tools/list", json!({})).await;
     let ro = tool_names(&v);
-    assert_eq!(ro.len(), 7);
+    assert_eq!(ro.len(), 8); // + list_teams
     assert!(
         !ro.iter()
             .any(|n| n == "link_fix" || n == "resolve_issue" || n == "mute_issue")

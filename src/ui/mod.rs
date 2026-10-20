@@ -1,10 +1,12 @@
 //! Server-rendered UI (PLAN §8, §9): plumbing, setup/auth pages, settings.
+mod backup;
 pub mod chart;
 mod dashboard;
 mod issues;
 pub use issues::issue_markdown;
 mod releases;
 mod settings;
+mod teams;
 mod tv;
 
 use crate::{
@@ -45,6 +47,8 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/reset/{token}", get(reset_page).post(reset))
         .route("/invite/{token}", get(invite_page).post(accept_invite))
+        .route("/setup/email", get(setup_email))
+        .route("/settings/server", post(save_server))
         .route("/settings", get(settings).post(save_org))
         .route("/settings/members", get(members))
         .route("/settings/members/invite", post(invite))
@@ -70,6 +74,8 @@ pub fn routes() -> Router<AppState> {
         .merge(issues::routes())
         .merge(releases::routes())
         .merge(settings::routes())
+        .merge(backup::routes())
+        .merge(teams::routes())
         .merge(tv::routes())
         .fallback(async || E(StatusCode::NOT_FOUND, String::new()))
         .layer(DefaultBodyLimit::max(64 * 1024)) // overrides the ingest-wide disable
@@ -338,14 +344,9 @@ fn admin(u: &CurrentUser) -> Result<(), E> {
     }
 }
 
-/// OPENFAULT_BASE_URL, else http://{Host}.
-pub fn base_url(h: &HeaderMap) -> String {
-    std::env::var("OPENFAULT_BASE_URL")
-        .map(|u| u.trim_end_matches('/').to_string())
-        .unwrap_or_else(|_| {
-            let host = h.get(header::HOST).and_then(|v| v.to_str().ok());
-            format!("http://{}", host.unwrap_or("localhost:8080"))
-        })
+/// Configured base URL (settings or OPENFAULT_BASE_URL), else http://{Host}.
+pub fn base_url(st: &AppState, h: &HeaderMap) -> String {
+    crate::config::base_or(&st.db, h.get(header::HOST).and_then(|v| v.to_str().ok()))
 }
 
 /// `{scheme}://{public_key}@{host}/{project_id}`
@@ -354,7 +355,7 @@ pub fn dsn(base: &str, key: &str, pid: i64) -> String {
     format!("{scheme}://{key}@{host}/{pid}")
 }
 
-fn slugify(s: &str) -> String {
+pub(crate) fn slugify(s: &str) -> String {
     let s: String = s
         .to_lowercase()
         .chars()
@@ -373,7 +374,7 @@ fn hex(b: &[u8]) -> String {
 }
 
 const PLATFORMS: [&str; 5] = ["ruby", "javascript", "node", "python", "other"];
-fn platform(p: &str) -> &str {
+pub(crate) fn platform(p: &str) -> &str {
     if PLATFORMS.contains(&p) { p } else { "other" }
 }
 
@@ -431,9 +432,9 @@ fn project_row(r: &rusqlite::Row) -> rusqlite::Result<Project> {
     })
 }
 pub(crate) const VISIBLE: &str =
-    "(?1 OR id IN (SELECT project_id FROM project_members WHERE user_id = ?2))";
+    "(?1 OR id IN (SELECT project_id FROM project_access WHERE user_id = ?2))";
 
-/// Owner/admin: every project. Member: only projects in project_members.
+/// Owner/admin: every project. Member: direct project_members ∪ projects of their teams (`project_access`).
 pub async fn visible_projects(st: &AppState, u: &CurrentUser) -> Result<Vec<Project>, E> {
     let (all, uid) = (u.is_admin(), u.id);
     Ok(st
@@ -464,7 +465,17 @@ pub async fn project_for(st: &AppState, u: &CurrentUser, slug: String) -> Result
         .ok_or_else(not_found)
 }
 
-fn insert_project(
+/// `project_for`, and `u` must administer it (org admin, direct project admin, or admin of a team that has it).
+pub async fn admin_project_for(st: &AppState, u: &CurrentUser, slug: String) -> Result<Project, E> {
+    let p = project_for(st, u, slug).await?;
+    if crate::teams::project_admin(&st.db, u, p.id).await? {
+        Ok(p)
+    } else {
+        Err(forbidden())
+    }
+}
+
+pub(crate) fn insert_project(
     c: &rusqlite::Connection,
     name: &str,
     slug: &str,
@@ -482,7 +493,7 @@ fn insert_project(
     Ok(pid)
 }
 
-fn valid_email(e: &str) -> bool {
+pub(crate) fn valid_email(e: &str) -> bool {
     e.len() <= 254
         && e.split_once('@')
             .is_some_and(|(a, b)| !a.is_empty() && b.contains('.'))
@@ -494,6 +505,9 @@ fn valid_email(e: &str) -> bool {
 #[template(path = "setup.html")]
 struct Setup {
     error: Option<String>,
+    /// operator hint: the one-time setup token for REST/MCP bootstrap
+    token: Option<String>,
+    token_env: bool,
 }
 
 async fn users_exist(st: &AppState) -> Result<bool, E> {
@@ -503,11 +517,20 @@ async fn users_exist(st: &AppState) -> Result<bool, E> {
         .await?)
 }
 
+async fn setup_view(st: &AppState, error: Option<String>) -> R {
+    let token = crate::setup::ensure(st).await?;
+    render(Setup {
+        error,
+        token,
+        token_env: std::env::var("OPENFAULT_SETUP_TOKEN").is_ok_and(|t| !t.is_empty()),
+    })
+}
+
 async fn setup_page(State(st): State<AppState>) -> R {
     if users_exist(&st).await? {
         return to("/login");
     }
-    render(Setup { error: None })
+    setup_view(&st, None).await
 }
 
 #[derive(Deserialize)]
@@ -520,54 +543,257 @@ struct SetupForm {
     platform: String,
 }
 
-async fn setup(State(st): State<AppState>, Form(f): Form<SetupForm>) -> R {
-    let email = f.email.trim().to_lowercase();
-    let err = if f.password.len() < 10 {
+/// Shared validation for the wizard and `POST /api/v1/setup`.
+pub(crate) fn setup_error(org: &str, email: &str, pw: &str, project: &str) -> Option<&'static str> {
+    if pw.len() < 10 {
         Some("Password must be at least 10 characters.")
-    } else if !valid_email(&email) {
+    } else if !valid_email(email) {
         Some("Enter a valid email.")
-    } else if f.org_name.trim().is_empty() || f.project_name.trim().is_empty() {
+    } else if org.trim().is_empty() || project.trim().is_empty() {
         Some("Organization and project names are required.")
     } else {
         None
-    };
-    if let Some(e) = err {
-        return render(Setup {
-            error: Some(e.into()),
-        });
+    }
+}
+
+async fn setup(State(st): State<AppState>, Form(f): Form<SetupForm>) -> R {
+    let email = f.email.trim().to_lowercase();
+    if let Some(e) = setup_error(&f.org_name, &email, &f.password, &f.project_name) {
+        return setup_view(&st, Some(e.into())).await;
     }
     let pw = auth::hash_password(f.password).await;
     let done = st
         .db
         .write(move |c| {
-            let tx = c.transaction()?;
-            if tx.query_row("SELECT EXISTS (SELECT 1 FROM users)", [], |r| r.get(0))? {
-                return Ok(None);
-            }
             let org = f.org_name.trim();
-            tx.execute(
-                "INSERT INTO orgs (id, name, slug, created_at) VALUES (1, ?1, ?2, ?3)
-                 ON CONFLICT(id) DO UPDATE SET name = excluded.name, slug = excluded.slug",
-                params![org, slugify(org), now()],
-            )?;
-            tx.execute(
-                "INSERT INTO users (email, name, pw_hash, is_owner, role, created_at) VALUES (?1, ?2, ?3, 1, 'owner', ?4)",
-                params![email, f.name.trim(), pw, now()],
-            )?;
-            let uid = tx.last_insert_rowid();
-            let slug = slugify(&f.project_name);
-            insert_project(&tx, f.project_name.trim(), &slug, platform(&f.platform))?;
-            tx.commit()?;
-            Ok(Some((uid, slug)))
+            crate::setup::create_instance(
+                c,
+                org,
+                &slugify(org),
+                f.name.trim(),
+                &email,
+                &pw,
+                f.project_name.trim(),
+                &f.platform,
+                |_, _, _| Ok(()),
+            )
         })
         .await?;
-    let Some((uid, slug)) = done else {
+    let Some((uid, _, slug)) = done else {
         return to("/login");
     };
+    crate::setup::consumed(&st).await;
     with_cookie(
-        &format!("/projects/{slug}/setup-sdk"),
+        &format!("/setup/email?project={slug}"),
         auth::login(&st, uid).await?,
     )
+}
+
+// ---------- server settings: wizard step 2 + Settings → Organization ----------
+
+/// What the server form shows. Secrets are never rendered, only whether they are set.
+pub struct ServerView {
+    pub base_url: String,
+    pub base_env: bool,
+    pub smtp: crate::config::Smtp,
+    pub smtp_pw_set: bool,
+    pub smtp_env: bool,
+    pub smtp_on: bool,
+    pub smtp_error: Option<String>,
+    pub relay_url: String,
+    pub relay_token_set: bool,
+    pub relay_env: bool,
+    pub relay_on: bool,
+    pub allow_private: bool,
+    pub allow_env: bool,
+    /// (ok, message) of the last "Send test email"
+    pub test: Option<(bool, String)>,
+    /// test email recipient (the signed-in user)
+    pub to: String,
+    /// wizard: project slug to continue to; empty on the Settings page
+    pub project: String,
+    /// recent SMTP attempts: (time, recipient domain, subject, error)
+    pub mails: Vec<(i64, String, String, Option<String>)>,
+}
+
+pub const SES_REGIONS: [&str; 12] = [
+    "us-east-1",
+    "us-east-2",
+    "us-west-1",
+    "us-west-2",
+    "ca-central-1",
+    "eu-west-1",
+    "eu-west-2",
+    "eu-central-1",
+    "ap-south-1",
+    "ap-southeast-1",
+    "ap-southeast-2",
+    "ap-northeast-1",
+];
+
+async fn server_view(
+    st: &AppState,
+    h: &HeaderMap,
+    to: &str,
+    project: String,
+    test: Option<(bool, String)>,
+) -> Result<ServerView, E> {
+    let cfg = crate::config::get(&st.db);
+    let mut smtp = cfg.stored.smtp.clone().unwrap_or_default();
+    let smtp_pw_set = !smtp.password.is_empty();
+    smtp.password.clear();
+    if smtp.mode.is_empty() {
+        smtp.mode = "starttls".into();
+    }
+    let relay = cfg.stored.push_relay.clone().unwrap_or_default();
+    let mails = st
+        .db
+        .read(|c| {
+            c.prepare("SELECT created_at, to_domain, subject, error FROM mail_log ORDER BY id DESC LIMIT 10")?
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+                .collect()
+        })
+        .await?;
+    Ok(ServerView {
+        base_url: base_url(st, h),
+        base_env: cfg.base_env,
+        smtp,
+        smtp_pw_set,
+        smtp_env: cfg.smtp_env,
+        smtp_on: cfg.smtp.is_some(),
+        smtp_error: cfg.smtp_error.clone(),
+        relay_url: if cfg.relay_env {
+            cfg.relay
+                .as_ref()
+                .map(|r| r.url.clone())
+                .unwrap_or_default()
+        } else {
+            relay.url
+        },
+        relay_token_set: !relay.token.is_empty(),
+        relay_env: cfg.relay_env,
+        relay_on: cfg.relay.is_some(),
+        allow_private: cfg.allow_private,
+        allow_env: cfg.allow_env,
+        test,
+        to: to.to_string(),
+        project,
+        mails,
+    })
+}
+
+#[derive(Template)]
+#[template(path = "setup_email.html")]
+struct SetupEmail {
+    v: ServerView,
+}
+
+#[derive(Deserialize)]
+struct ProjectQ {
+    #[serde(default)]
+    project: String,
+}
+
+async fn setup_email(
+    me: Me,
+    State(st): State<AppState>,
+    h: HeaderMap,
+    axum::extract::Query(q): axum::extract::Query<ProjectQ>,
+) -> R {
+    admin(&me)?;
+    let v = server_view(&st, &h, &me.email, slugify(&q.project), None).await?;
+    render(SetupEmail { v })
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct ServerForm {
+    base_url: String,
+    smtp_host: String,
+    smtp_port: String,
+    smtp_username: String,
+    smtp_password: String,
+    smtp_from: String,
+    smtp_mode: String,
+    relay_url: String,
+    relay_token: String,
+    /// present only on the Settings form (the wizard has no checkbox)
+    has_allow: String,
+    allow_private: String,
+    /// save | test
+    action: String,
+    project: String,
+}
+
+/// Saves the form (env-set sections untouched; blank secret = keep), then optionally sends a test email.
+async fn save_server(
+    me: Me,
+    State(st): State<AppState>,
+    h: HeaderMap,
+    Form(f): Form<ServerForm>,
+) -> R {
+    admin(&me)?;
+    let cfg = crate::config::get(&st.db);
+    let (base_env, smtp_env, relay_env) = (cfg.base_env, cfg.smtp_env, cfg.relay_env);
+    let project = slugify(&f.project);
+    let wizard = !f.project.trim().is_empty();
+    let test = f.action == "test";
+    crate::config::update(&st.db, move |s| {
+        let t = |x: &str| x.trim().to_string();
+        if !base_env {
+            s.base_url = Some(t(&f.base_url)).filter(|u| !u.is_empty());
+        }
+        if !smtp_env {
+            let old = s.smtp.take().map(|x| x.password).unwrap_or_default();
+            s.smtp = (!f.smtp_host.trim().is_empty()).then(|| crate::config::Smtp {
+                host: t(&f.smtp_host),
+                port: f.smtp_port.trim().parse().unwrap_or(0),
+                username: t(&f.smtp_username),
+                password: if f.smtp_password.is_empty() {
+                    old
+                } else {
+                    f.smtp_password
+                },
+                from: t(&f.smtp_from),
+                mode: match f.smtp_mode.as_str() {
+                    "tls" | "none" => f.smtp_mode,
+                    _ => "starttls".into(),
+                },
+            });
+        }
+        if !relay_env {
+            let old = s.push_relay.take().map(|x| x.token).unwrap_or_default();
+            s.push_relay = (!f.relay_url.trim().is_empty()).then(|| crate::config::Relay {
+                url: t(&f.relay_url),
+                token: if f.relay_token.trim().is_empty() {
+                    old
+                } else {
+                    t(&f.relay_token)
+                },
+            });
+        }
+        if !f.has_allow.is_empty() {
+            s.allow_private_webhooks = !f.allow_private.is_empty();
+        }
+    })
+    .await?;
+    if !test {
+        return if wizard {
+            to(&format!("/setup/backup?project={project}"))
+        } else {
+            flash("/settings", "Server settings saved")
+        };
+    }
+    let r = match mail::send_test(&st.db, &me.email).await {
+        Ok(()) => (true, format!("Test email sent to {}.", me.email)),
+        Err(e) => (false, format!("Test email failed: {e}")),
+    };
+    let to = me.email.clone();
+    if wizard {
+        let v = server_view(&st, &h, &to, project, Some(r)).await?;
+        return render(SetupEmail { v });
+    }
+    settings_page(&st, me, &h, Some(r)).await
 }
 
 #[derive(Template)]
@@ -601,7 +827,7 @@ async fn setup_sdk(
 ) -> R {
     let project = project_for(&st, &me, slug).await?;
     let dsn = dsn(
-        &base_url(&h),
+        &base_url(&st, &h),
         &first_key(&st, project.id).await?,
         project.id,
     );
@@ -704,7 +930,7 @@ async fn logout(State(st): State<AppState>, h: HeaderMap) -> R {
             .write(move |c| c.execute("DELETE FROM sessions WHERE id_hash = ?1", [hash]))
             .await?;
     }
-    with_cookie("/login", auth::clear_cookie())
+    with_cookie("/login", auth::clear_cookie(&st.db))
 }
 
 #[derive(Template)]
@@ -747,11 +973,11 @@ async fn forgot(
         })
         .await?
         > 0;
-    // without OPENFAULT_BASE_URL the link comes from the request's Host header, which an
+    // without a configured base URL the link comes from the request's Host header, which an
     // anonymous caller controls (reset-link poisoning), so never email it.
-    let mail_ok = mail::configured() && std::env::var("OPENFAULT_BASE_URL").is_ok();
+    let mail_ok = mail::configured(&st.db) && crate::config::get(&st.db).base_url.is_some();
     if found {
-        let link = format!("{}/reset/{tok}", base_url(&h));
+        let link = format!("{}/reset/{tok}", base_url(&st, &h));
         if mail_ok {
             let text = format!("Reset your OpenFault password (valid 1 hour):\n\n{link}\n");
             let html = format!(
@@ -761,7 +987,7 @@ async fn forgot(
         } else {
             // deviation: never show a reset link to an anonymous visitor; without SMTP the admin reads it from the log.
             tracing::warn!(
-                "SMTP or OPENFAULT_BASE_URL not configured; password reset link for {email}: {link}"
+                "SMTP or base URL not configured; password reset link for {email}: {link}"
             );
         }
     }
@@ -917,15 +1143,15 @@ async fn accept_invite(
         .db
         .write(move |c| {
             let tx = c.transaction()?;
-            let inv: Option<(String, String, String)> = tx
+            let inv: Option<(String, String, String, String)> = tx
                 .query_row(
                     "UPDATE invites SET accepted_at = ?2 WHERE token_hash = ?1 AND accepted_at IS NULL AND expires_at > ?2
-                     RETURNING email, role, project_ids_json",
+                     RETURNING email, role, project_ids_json, team_ids_json",
                     params![th, now()],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
                 )
                 .optional()?;
-            let Some((email, role, pids)) = inv else { return Ok(None) };
+            let Some((email, role, pids, teams)) = inv else { return Ok(None) };
             if tx.query_row("SELECT EXISTS (SELECT 1 FROM users WHERE email = ?1)", [&email], |r| r.get(0))? {
                 return Ok(None);
             }
@@ -934,11 +1160,7 @@ async fn accept_invite(
                 params![email, f.name.trim(), pw, role, now()],
             )?;
             let uid = tx.last_insert_rowid();
-            tx.execute(
-                "INSERT INTO project_members (project_id, user_id, role)
-                 SELECT value, ?1, 'member' FROM json_each(?2) WHERE value IN (SELECT id FROM projects)",
-                params![uid, pids],
-            )?;
+            crate::teams::apply_grants(&tx, uid, &pids, &teams)?;
             tx.commit()?;
             Ok(Some(uid))
         })
@@ -956,12 +1178,10 @@ async fn accept_invite(
 struct Settings {
     me: Me,
     org_name: String,
-    base_url: String,
-    smtp: bool,
-    push: String,
+    v: ServerView,
 }
 
-async fn settings(me: Me, State(st): State<AppState>, h: HeaderMap) -> R {
+async fn settings_page(st: &AppState, me: Me, h: &HeaderMap, test: Option<(bool, String)>) -> R {
     admin(&me)?;
     let org_name = st
         .db
@@ -971,13 +1191,12 @@ async fn settings(me: Me, State(st): State<AppState>, h: HeaderMap) -> R {
         })
         .await?
         .unwrap_or_default();
-    render(Settings {
-        me,
-        org_name,
-        base_url: base_url(&h),
-        smtp: mail::configured(),
-        push: crate::notify::push::status(),
-    })
+    let v = server_view(st, h, &me.email, String::new(), test).await?;
+    render(Settings { me, org_name, v })
+}
+
+async fn settings(me: Me, State(st): State<AppState>, h: HeaderMap) -> R {
+    settings_page(&st, me, &h, None).await
 }
 
 #[derive(Deserialize)]
@@ -998,6 +1217,8 @@ pub struct Member {
     pub email: String,
     pub name: String,
     pub role: String,
+    /// "Backend (admin), Mobile"
+    pub teams: String,
 }
 
 pub struct PendingInvite {
@@ -1005,6 +1226,8 @@ pub struct PendingInvite {
     pub email: String,
     pub role: String,
     pub expires_at: i64,
+    /// teams + projects the invite grants
+    pub access: String,
 }
 
 #[derive(Template)]
@@ -1013,6 +1236,7 @@ struct Members {
     me: Me,
     users: Vec<Member>,
     projects: Vec<Project>,
+    teams: Vec<crate::teams::Team>,
     invites: Vec<PendingInvite>,
     invite_link: Option<String>,
     invited: String,
@@ -1024,13 +1248,21 @@ async fn members_page(st: &AppState, me: Me, invite: Option<(String, String)>) -
     let invites = st
         .db
         .read(|c| {
-            c.prepare("SELECT token_hash, email, role, expires_at FROM invites WHERE accepted_at IS NULL AND expires_at > ?1 ORDER BY expires_at DESC")?
+            c.prepare(
+                "SELECT token_hash, email, role, expires_at, trim(
+                   coalesce((SELECT group_concat(t.name || iif(json_extract(j.value, '$.role') = 'admin', ' (admin)', ''), ', ')
+                     FROM json_each(team_ids_json) j JOIN teams t ON t.id = json_extract(j.value, '$.id')), '') || ' · ' ||
+                   coalesce((SELECT group_concat(name, ', ') FROM projects WHERE id IN (SELECT value FROM json_each(project_ids_json))), ''),
+                 ' ·')
+                 FROM invites WHERE accepted_at IS NULL AND expires_at > ?1 ORDER BY expires_at DESC",
+            )?
                 .query_map([now()], |r| {
                     Ok(PendingInvite {
                         hash: r.get(0)?,
                         email: r.get(1)?,
                         role: r.get(2)?,
                         expires_at: r.get(3)?,
+                        access: r.get(4)?,
                     })
                 })?
                 .collect()
@@ -1043,27 +1275,35 @@ async fn members_page(st: &AppState, me: Me, invite: Option<(String, String)>) -
     let users = st
         .db
         .read(|c| {
-            c.prepare("SELECT id, email, name, role FROM users ORDER BY id")?
+            c.prepare(
+                "SELECT u.id, u.email, u.name, u.role, coalesce((SELECT group_concat(t.name || iif(m.role = 'admin', ' (admin)', ''), ', ')
+                   FROM team_members m JOIN teams t ON t.id = m.team_id WHERE m.user_id = u.id), '')
+                 FROM users u ORDER BY u.id",
+            )?
                 .query_map([], |r| {
                     Ok(Member {
                         id: r.get(0)?,
                         email: r.get(1)?,
                         name: r.get(2)?,
                         role: r.get(3)?,
+                        teams: r.get(4)?,
                     })
                 })?
                 .collect()
         })
         .await?;
     let projects = visible_projects(st, &me).await?;
+    let u = me.user.clone();
+    let teams = st.db.read(move |c| crate::teams::list(c, &u)).await?;
     render(Members {
         me,
         users,
         projects,
+        teams,
         invites,
         invite_link,
         invited,
-        smtp: mail::configured(),
+        smtp: mail::configured(&st.db),
     })
 }
 
@@ -1071,7 +1311,7 @@ async fn members(me: Me, State(st): State<AppState>) -> R {
     members_page(&st, me, None).await
 }
 
-/// Form fields: email, role, p (repeated project id).
+/// Form fields: email, role, p (repeated project id), t (repeated team id) + `tr:{team id}` = member|admin.
 async fn invite(
     me: Me,
     State(st): State<AppState>,
@@ -1098,27 +1338,72 @@ async fn invite(
         .filter(|(n, _)| n == "p")
         .filter_map(|(_, v)| v.parse().ok())
         .collect();
+    let teams = f
+        .iter()
+        .filter(|(n, _)| n == "t")
+        .filter_map(|(_, v)| v.parse().ok())
+        .map(|id: i64| crate::teams::Grant {
+            id,
+            role: crate::teams::role(&field(&format!("tr:{id}")).unwrap_or_default()).into(),
+        })
+        .collect();
+    match create_invite(&st, me.id, &email, role, pids, teams, &base_url(&st, &h)).await? {
+        Some(link) => members_page(&st, me, Some((email, link))).await,
+        None => flash("/settings/members", &format!("Access updated for {email}")),
+    }
+}
+
+/// Inserts an invite (7 days), emails it when SMTP is on, returns the link. Shared with MCP and REST.
+/// Email already a member → adds the project/team grants directly, only raising roles (never lowering), returns None.
+pub(crate) async fn create_invite(
+    st: &AppState,
+    by: i64,
+    email: &str,
+    role: &'static str,
+    pids: Vec<i64>,
+    teams: Vec<crate::teams::Grant>,
+    base: &str,
+) -> Result<Option<String>, E> {
     let tok = auth::new_token();
     let th = auth::hash_token(&tok);
-    let (e2, uid) = (email.clone(), me.id);
-    st.db
+    let e2 = email.to_string();
+    let (pids, teams) = (
+        serde_json::to_string(&pids).unwrap(),
+        serde_json::to_string(&teams).unwrap(),
+    );
+    let existing = st
+        .db
         .write(move |c| {
+            let uid: Option<i64> = c
+                .query_row("SELECT id FROM users WHERE email = ?1", [&e2], |r| r.get(0))
+                .optional()?;
+            if let Some(uid) = uid {
+                crate::teams::apply_grants(c, uid, &pids, &teams)?;
+                if role == "admin" {
+                    c.execute("UPDATE users SET role = 'admin' WHERE id = ?1 AND role = 'member'", [uid])?;
+                }
+                return Ok(true);
+            }
             c.execute(
-                "INSERT INTO invites (token_hash, email, role, project_ids_json, invited_by, expires_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![th, e2, role, serde_json::to_string(&pids).unwrap(), uid, now() + 7 * 86400],
+                "INSERT INTO invites (token_hash, email, role, project_ids_json, team_ids_json, invited_by, expires_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![th, e2, role, pids, teams, by, now() + 7 * 86400],
             )
+            .map(|_| false)
         })
         .await?;
-    let link = format!("{}/invite/{tok}", base_url(&h));
-    if mail::configured() {
+    if existing {
+        return Ok(None);
+    }
+    let link = format!("{base}/invite/{tok}");
+    if mail::configured(&st.db) {
         let text = format!("You were invited to OpenFault. Accept within 7 days:\n\n{link}\n");
         let html = format!(
             "<p>You were invited to OpenFault. Accept within 7 days:</p><p><a href=\"{link}\">{link}</a></p>"
         );
-        mail::send_mail(&st, &email, "You're invited to OpenFault", &text, &html).await;
+        mail::send_mail(st, email, "You're invited to OpenFault", &text, &html).await;
     }
-    members_page(&st, me, Some((email, link))).await
+    Ok(Some(link))
 }
 
 async fn revoke_invite(me: Me, State(st): State<AppState>, Path(hash): Path<String>) -> R {
@@ -1235,11 +1520,23 @@ struct ProjectPage {
     keys: Vec<Key>,
     dsn: String,
     quotas: Vec<(String, String)>,
+    can_admin: bool,
+    /// (slug, name) of teams that include this project
+    teams: Vec<(String, String)>,
 }
 
 async fn project(me: Me, State(st): State<AppState>, h: HeaderMap, Path(slug): Path<String>) -> R {
     let project = project_for(&st, &me, slug).await?;
-    let (base, pid) = (base_url(&h), project.id);
+    let (base, pid) = (base_url(&st, &h), project.id);
+    let can_admin = crate::teams::project_admin(&st.db, &me, pid).await?;
+    let teams = st
+        .db
+        .read(move |c| {
+            c.prepare("SELECT t.slug, t.name FROM team_projects tp JOIN teams t ON t.id = tp.team_id WHERE tp.project_id = ?1 ORDER BY t.name")?
+                .query_map([pid], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect()
+        })
+        .await?;
     let keys: Vec<Key> = st
         .db
         .read(move |c| {
@@ -1280,6 +1577,8 @@ async fn project(me: Me, State(st): State<AppState>, h: HeaderMap, Path(slug): P
         keys,
         dsn,
         quotas,
+        can_admin,
+        teams,
     })
 }
 
@@ -1299,8 +1598,7 @@ async fn save_project(
     Path(slug): Path<String>,
     Form(f): Form<ProjectSettingsForm>,
 ) -> R {
-    admin(&me)?;
-    let p = project_for(&st, &me, slug.clone()).await?;
+    let p = admin_project_for(&st, &me, slug.clone()).await?;
     st.db
         .write(move |c| {
             c.execute(
@@ -1335,8 +1633,7 @@ async fn create_key(
     Path(slug): Path<String>,
     Form(f): Form<LabelForm>,
 ) -> R {
-    admin(&me)?;
-    let p = project_for(&st, &me, slug.clone()).await?;
+    let p = admin_project_for(&st, &me, slug.clone()).await?;
     st.db
         .write(move |c| {
             c.execute(
@@ -1353,8 +1650,7 @@ async fn revoke_key(
     State(st): State<AppState>,
     Path((slug, id)): Path<(String, i64)>,
 ) -> R {
-    admin(&me)?;
-    let p = project_for(&st, &me, slug.clone()).await?;
+    let p = admin_project_for(&st, &me, slug.clone()).await?;
     st.db
         .write(move |c| {
             c.execute(

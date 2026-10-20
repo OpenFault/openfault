@@ -118,7 +118,7 @@ async fn resolve(st: &AppState, v: &Viewer, q: Option<String>) -> Option<(Scope,
         .read(move |c| {
             let v: Vec<i64> = c
                 // same rule as ui::VISIBLE; inlined so UI rewrites can't silently widen it.
-                .prepare("SELECT id FROM projects WHERE ?1 OR id IN (SELECT project_id FROM project_members WHERE user_id = ?2)")?
+                .prepare("SELECT id FROM projects WHERE ?1 OR id IN (SELECT project_id FROM project_access WHERE user_id = ?2)")?
                 .query_map(params![all, uid], |r| r.get(0))?
                 .collect::<rusqlite::Result<_>>()?;
             let ip: Option<i64> = match issue {

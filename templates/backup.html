@@ -1,0 +1,25 @@
+{% extends "app.html" %}
+{% block title %}Backups{% endblock %}
+{% block content %}
+<div class="head"><h1>Settings</h1></div>
+{% include "settings_nav.html" %}
+<div class="form-col">
+<section class="card sec">
+  <h2>Backups</h2>
+  {% if v.failing > 0 %}<p class="error" role="alert">The last {{ v.failing }} backup run{% if v.failing > 1 %}s{% endif %} failed. See Recent runs below.</p>{% endif %}
+  {% include "backup_form.html" %}
+</section>
+<section class="card sec">
+  <h2>Restore</h2>
+  {% if let Some(cmd) = v.restore %}
+  <p class="hint">Stop the server, then run this with the same data directory (OPENFAULT_DATA). The current database is kept as openfault.db.pre-restore-&lt;time&gt;.</p>
+  <div class="snip"><pre><code>{{ cmd }}</code></pre><button type="button" class="secondary sm" data-copy>{{ crate::ui::icon("copy")|safe }}Copy</button></div>
+  {% else %}<p class="muted">No successful backup yet.</p>{% endif %}
+</section>
+{% if !v.runs.is_empty() %}<section class="card sec">
+  <h2>Recent runs</h2>
+  <div class="tbl"><table class="rt"><thead><tr><th>When</th><th>Object</th><th>Size</th><th>Result</th></tr></thead>
+  <tbody>{% for r in v.runs %}<tr><td class="muted">{{ crate::ui::ago(r.started_at) }}</td><td>{% if let Some(k) = r.key %}{{ k }}{% endif %}</td><td>{% if let Some(n) = r.bytes %}{{ n / 1024 }} KB{% endif %}</td><td>{% if r.ok %}<span class="notice">ok</span>{% else if !r.done %}<span class="muted">running</span>{% else %}<span class="error">{{ r.error.as_deref().unwrap_or("failed") }}</span>{% endif %}</td></tr>{% endfor %}</tbody></table></div>
+</section>{% endif %}
+</div>
+{% endblock %}

@@ -189,9 +189,7 @@ pub async fn claim(
         .collect();
     Ok(Claimed {
         token,
-        base_url: std::env::var("OPENFAULT_BASE_URL")
-            .ok()
-            .map(|u| u.trim_end_matches('/').to_string()),
+        base_url: crate::config::get(&st.db).base_url.clone(),
         device_id,
         user: json!({"id": u.id, "name": u.name, "email": u.email}),
         projects,
@@ -232,7 +230,7 @@ async fn start(
     State(st): State<AppState>,
     h: HeaderMap,
 ) -> Result<Json<PairingStart>, ApiErr> {
-    start_pairing(&st.db, uid, &crate::ui::base_url(&h))
+    start_pairing(&st.db, uid, &crate::ui::base_url(&st, &h))
         .await
         .map(Json)
 }

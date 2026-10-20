@@ -14,6 +14,8 @@ pub struct Db {
     path: Arc<std::path::PathBuf>,
     /// deviation: live-update channel lives on Db (not just AppState) so `process::run` and `apply_action`, which only get a Db, can publish.
     pub live: tokio::sync::broadcast::Sender<crate::live::LiveEvent>,
+    /// effective instance settings, see `config::get`.
+    pub cfg: crate::config::Cache,
 }
 
 #[derive(Debug)]
@@ -61,6 +63,16 @@ impl Db {
         }
         w.execute_batch(include_str!("schema.sql"))?;
         crate::notify::migrate(&w)?;
+        // resolve_baseline: latest release when resolved-in-next-release (process::upsert_release).
+        let has: bool = w.query_row(
+            "SELECT count(*) > 0 FROM pragma_table_info('issues') WHERE name = 'resolve_baseline'",
+            [],
+            |r| r.get(0),
+        )?;
+        if !has {
+            w.execute("ALTER TABLE issues ADD COLUMN resolve_baseline TEXT", [])?;
+        }
+        crate::teams::migrate(&w)?;
         let readers = (0..READERS)
             .map(|_| open_reader(path))
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -79,6 +91,7 @@ impl Db {
             readers: Arc::new(Mutex::new(readers)),
             path: Arc::new(path.to_owned()),
             live: tokio::sync::broadcast::channel(1024).0,
+            cfg: Default::default(),
         })
     }
 
@@ -98,6 +111,25 @@ impl Db {
         Ok(orx
             .await
             .map_err(|_| DbError("writer dropped job".into()))??)
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Synchronous read on the caller's thread. ponytail: for one-row lookups only (config cache refresh).
+    pub fn read_now<T>(&self, f: impl FnOnce(&Connection) -> rusqlite::Result<T>) -> Result<T> {
+        let popped = self.readers.lock().unwrap().pop();
+        let c = match popped {
+            Some(c) => c,
+            None => open_reader(&self.path)?,
+        };
+        let r = f(&c);
+        let mut p = self.readers.lock().unwrap();
+        if p.len() < READERS {
+            p.push(c);
+        }
+        Ok(r?)
     }
 
     pub async fn read<T, F>(&self, f: F) -> Result<T>
@@ -127,7 +159,16 @@ impl Db {
 }
 
 pub fn now() -> i64 {
-    jiff::Timestamp::now().as_second()
+    jiff::Timestamp::now().as_second() + time_offset()
+}
+
+/// Test-only (tests/soak.rs): seconds read from `OPENFAULT_TIME_OFFSET_FILE` are added to `now()` to fast-forward. Unset in prod → 0.
+fn time_offset() -> i64 {
+    static PATH: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    PATH.get_or_init(|| std::env::var("OPENFAULT_TIME_OFFSET_FILE").ok())
+        .as_ref()
+        .and_then(|p| std::fs::read_to_string(p).ok()?.trim().parse().ok())
+        .unwrap_or(0)
 }
 
 /// ponytail: dev/test seed until the M2 setup wizard exists. Creates org 1 + project 1 "dev" if no projects exist.

@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS issues (
   first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL, event_count INTEGER NOT NULL DEFAULT 0,
   user_count INTEGER NOT NULL DEFAULT 0, stored_count INTEGER NOT NULL DEFAULT 0,
   first_release TEXT, last_release TEXT, fixed_at_releases_json TEXT, approved_by INTEGER, approved_at INTEGER,
-  fix_link TEXT, assignee_id INTEGER, last_spike_at INTEGER);
+  fix_link TEXT, assignee_id INTEGER, last_spike_at INTEGER, resolve_baseline TEXT);
 CREATE INDEX IF NOT EXISTS issues_project_status ON issues(project_id, status, last_seen);
 -- deviation: project_id added so identical bugs in two projects never merge.
 CREATE TABLE IF NOT EXISTS issue_hashes (
@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS notif_prefs (
   email INTEGER NOT NULL DEFAULT 1, push INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS webhooks (
   id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, kind TEXT NOT NULL,
-  url TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, last_error TEXT, secret TEXT, last_ok_at INTEGER);
+  url TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, last_error TEXT, secret TEXT, last_ok_at INTEGER, extra TEXT);
 -- notification pipeline (src/notify): one row per trigger; kept 24h as the Settings delivery log.
 CREATE TABLE IF NOT EXISTS notif_queue (
   id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, issue_id INTEGER NOT NULL, kind TEXT NOT NULL,
@@ -111,5 +111,36 @@ CREATE TABLE IF NOT EXISTS inbox (
 CREATE TABLE IF NOT EXISTS saved_views (
   id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, name TEXT NOT NULL,
   query TEXT NOT NULL, sort TEXT NOT NULL DEFAULT 'last_seen', created_at INTEGER NOT NULL);
+-- every SMTP attempt (recipient domain only), shown under Settings → Organization; purged after 24h.
+CREATE TABLE IF NOT EXISTS mail_log (
+  id INTEGER PRIMARY KEY, to_domain TEXT NOT NULL, subject TEXT NOT NULL, error TEXT, created_at INTEGER NOT NULL);
+-- one-time bootstrap token (src/setup.rs), stored hashed; deleted when the first user is created.
+CREATE TABLE IF NOT EXISTS setup_token (token_hash TEXT PRIMARY KEY, created_at INTEGER NOT NULL);
+
+-- teams (src/teams.rs): a project may belong to many teams; team admins are admins on the team's projects.
+CREATE TABLE IF NOT EXISTS teams (
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS team_members (
+  team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, role TEXT NOT NULL DEFAULT 'member', -- admin|member
+  PRIMARY KEY (team_id, user_id));
+CREATE INDEX IF NOT EXISTS team_members_user ON team_members(user_id);
+CREATE TABLE IF NOT EXISTS team_projects (
+  team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, PRIMARY KEY (team_id, project_id));
+-- team ids are reused after delete (no AUTOINCREMENT): drop a deleted team from pending invites so they can't grant its successor.
+CREATE TRIGGER IF NOT EXISTS teams_unlink_invites AFTER DELETE ON teams BEGIN
+  UPDATE invites SET team_ids_json = (SELECT json_group_array(json(value)) FROM json_each(team_ids_json)
+    WHERE json_extract(value, '$.id') != OLD.id) WHERE accepted_at IS NULL;
+END;
+-- every (project, user, role) grant: direct project_members ∪ via teams. All visibility/admin checks read this.
+CREATE VIEW IF NOT EXISTS project_access AS
+  SELECT project_id, user_id, role FROM project_members
+  UNION ALL SELECT tp.project_id, tm.user_id, tm.role FROM team_projects tp JOIN team_members tm ON tm.team_id = tp.team_id;
+
+-- one row per backup run (src/backup.rs), shown under Settings → Backups.
+CREATE TABLE IF NOT EXISTS backups_log (
+  id INTEGER PRIMARY KEY, started_at INTEGER NOT NULL, finished_at INTEGER, key TEXT, bytes INTEGER,
+  ok INTEGER NOT NULL DEFAULT 0, error TEXT);
 
 INSERT INTO schema_version (version) SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM schema_version);

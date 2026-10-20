@@ -26,7 +26,11 @@ volumes:
   openfault-data:
 ```
 
-Open http://localhost:8080. The first visit runs a setup wizard that creates the admin and the first project.
+Open http://localhost:8080. Nothing needs configuring first. The first visit runs a setup wizard: step 1 creates the organization, the owner and the first project; step 2 (optional, skippable) sets the base URL, SMTP (with an Amazon SES preset and a "Send test email" button) and the push relay; step 3 (optional) sets up S3 backups. All of it stays editable under Settings → Organization.
+
+Prefer an agent or a script? Until the owner exists, the server logs a one-time **setup token** (`ofs_…`, also shown on `/setup`). Use it as `Authorization: Bearer <setup token>` either for `POST /api/v1/setup` (`{"org": {"name"}, "owner": {"email", "name", "password"}, "project": {"name", "platform"}, "smtp"?, "push_relay"?, "base_url"?}` → `{api_token, dsn, project, login_url}`) or for the MCP endpoint, where the only tool is `setup_instance`. Set `OPENFAULT_SETUP_TOKEN` to choose the token yourself. It stops working once the first user exists.
+
+The container's `HEALTHCHECK` runs `openfault healthcheck` (GET `/healthz` on `127.0.0.1:$OPENFAULT_PORT`, exit 0 on 200, else 1), since the distroless image has no shell or curl.
 
 ## Point your SDK at it
 
@@ -43,6 +47,8 @@ Only the DSN changes.
 
 Tests: `cargo test` (includes a SIGKILL crash-safety test and property tests). The 10k-event load check is ignored by default: `cargo test --release -- --ignored load`.
 
+Soak (ignored, ~13 min): `cargo test --release --test soak -- --ignored --nocapture` runs the release binary through 72 simulated hours (200 events/hour, retention 1 day, two SSE clients, resolves and mutes) and checks retention, purges, mute expiry, WAL size, DB size, RSS < 100 MB and a clean log. It fast-forwards the clock with `OPENFAULT_TIME_OFFSET_FILE` (a file holding seconds added to the server's `now()`), which is a test-only hook: never set it in production.
+
 | Variable | Default | Meaning |
 |---|---|---|
 | `OPENFAULT_DATA` | `./data` | Directory for the SQLite database and generated secret |
@@ -51,7 +57,7 @@ Tests: `cargo test` (includes a SIGKILL crash-safety test and property tests). T
 
 ## First-boot wizard
 
-Coming in M0.
+See Install: wizard (three steps), `POST /api/v1/setup` or MCP `setup_instance` with the setup token.
 
 ## Inviting teammates
 
@@ -59,7 +65,9 @@ Coming in M2.
 
 ## MCP setup (Claude Code, Cursor)
 
-Coming in M4.
+Settings → MCP shows the `claude mcp add` command and `mcp.json` snippets for `/mcp` with an API token. Issue tools: `list_projects`, `list_new_issues`, `search_issues`, `get_issue`, `get_event`, `list_releases`, `get_stats`, and with a write token `resolve_issue`, `mute_issue`, `link_fix`.
+
+Onboarding tools: on a fresh server, connect with the setup token and call `setup_instance` (one-time; it returns an owner API token to reconnect with). Owner/admin write tokens also get `create_project` (→ DSN), `invite_member` (→ invite link), `list_members`, `configure_email` + `send_test_email`, and `configure_push_relay`.
 
 ## Source maps (`sentry-cli`)
 
@@ -67,18 +75,26 @@ Coming in M5.
 
 ## Email (SMTP)
 
-Coming in M2.
+Set SMTP in the wizard or Settings → Organization (host, port, username, password, from, STARTTLS/TLS/none; Amazon SES preset per region), or via MCP `configure_email`. "Send test email" reports the SMTP error inline. Every send is logged (recipient domain only) and the last 24h show under Settings → Organization. `OPENFAULT_SMTP_URL` (`smtp://user:pass@host:587?from=OpenFault <noreply@x>`, `smtps://` for implicit TLS) overrides the stored settings.
 
 ## Push notifications
 
-OpenFault notifies on four triggers: new issue, regression, unmute (mute expired or volume threshold hit) and spike (an issue's hour is ≥ 20 events and over 10× its 24h hourly median, at most once per 6h). Each user picks email and push per trigger in Settings → Notifications (or `PUT /api/v1/me/notifications`). Every user gets at most one email/push per issue per trigger per hour. Webhooks (Slack, Discord, generic JSON) are set per project. Failed deliveries are retried 3 times and kept for 24h in the project's delivery log.
+OpenFault notifies on four triggers: new issue, regression, unmute (mute expired or volume threshold hit) and spike (an issue's hour is ≥ 20 events and over 10× its 24h hourly median, at most once per 6h). Each user picks email and push per trigger in Settings → Notifications (or `PUT /api/v1/me/notifications`). Every user gets at most one email/push per issue per trigger per hour. Webhooks (Slack, Discord, Mattermost, Teams, Telegram, generic JSON) are set per project. Failed deliveries are retried 3 times and kept for 24h in the project's delivery log.
+
+Env vars are optional overrides of Settings → Organization; when set, the form shows "set by environment" and locks the field.
 
 | Env | Meaning |
 |---|---|
+| `OPENFAULT_SETUP_TOKEN` | Pre-set the one-time setup token (automation). |
+| `OPENFAULT_SMTP_URL` | SMTP URL, overrides the stored SMTP settings. |
 | `OPENFAULT_BASE_URL` | Public URL used for links in emails, pushes and webhooks. |
-| `OPENFAULT_PUSH_RELAY_URL` | Push relay to send iOS pushes through, e.g. `https://push.openfault.dev`. Push is off unless this and the token are set. |
+| `OPENFAULT_PUSH_RELAY_URL` | Push relay to send iOS pushes through, e.g. `https://push.openfault.dev`. Push is off unless a relay URL and token are set (here or in Settings → Organization). |
 | `OPENFAULT_PUSH_RELAY_TOKEN` | Bearer token for that relay. |
 | `OPENFAULT_ALLOW_PRIVATE_WEBHOOKS` | `1` allows webhook URLs on localhost, private or link-local IPs (and plain `http://` to loopback). Off by default. |
+
+- `mattermost`: a Mattermost incoming webhook URL; posts `text` plus one attachment (title link, level/events/users/release fields).
+- `teams`: a Teams Workflows (Power Automate) "post to channel when a webhook request is received" URL; posts an Adaptive Card 1.4 with an "Open issue" button.
+- `telegram`: `https://api.telegram.org/bot<token>/sendMessage?chat_id=<chat id>`; the chat id is stored separately and the message is sent as HTML with link previews off.
 
 Generic webhooks receive `{"kind", "project", "issue": {"id", "title", "level", "url", "events", "users", "first_seen", "last_seen", "release"}}`. If you set a secret, each request carries `X-OpenFault-Timestamp: <unix seconds>` and `X-OpenFault-Signature: sha256=<hex HMAC-SHA256(secret, "{timestamp}.{raw body}")>`. Verify the signature over the timestamp header, a `.` and the raw body, and reject requests whose timestamp is more than ~5 minutes old (replay protection).
 
@@ -125,7 +141,23 @@ Set `OPENFAULT_BASE_URL=https://errors.example.com` so DSNs and links use the pu
 
 ## Upgrade and backup
 
-Coming in M8. Everything lives in the `/data` volume.
+Everything lives in the `/data` volume (`openfault.db`). Upgrades: pull the new image and restart; the schema migrates on boot.
+
+### Backups (S3-compatible)
+
+Settings → Backups (admins) or wizard step 3: endpoint, region, bucket, prefix, access key, secret key (never shown again), hour (UTC), keep (default 14) and path-style URLs. Presets: Amazon S3 per region, and **Cloudflare R2** (endpoint `https://<account>.r2.cloudflarestorage.com`, region `auto`, path-style on). "Test connection" writes and deletes a marker object; "Back up now" runs one backup (waits up to 30s, then keeps running in the background).
+
+Once a day at `hour_utc:00` the server takes an online SQLite snapshot (the writer is never blocked), compresses it with zstd and uploads `<prefix>/openfault-<YYYYMMDDTHHMMSSZ>.db.zst` with a single SigV4-signed PUT (up to 5 GB), then deletes all but the newest `keep`. Every run is logged; the last 20 and any failures show on the Backups page.
+
+Env vars override the stored settings field by field (setting the bucket also turns backups on and makes the form read-only): `OPENFAULT_BACKUP_S3_ENDPOINT`, `_REGION`, `_BUCKET`, `_PREFIX`, `_ACCESS_KEY`, `_SECRET_KEY`, `_HOUR`, `_KEEP`.
+
+CLI (same `OPENFAULT_DATA`):
+
+- `openfault backup now` runs one backup with the database settings (or env) and prints the key.
+- `openfault backup list` lists backups (key, bytes).
+- `openfault restore <key|s3://bucket/key>` downloads, decompresses and integrity-checks a backup, then writes it to `<data>/openfault.db`. It reads credentials **from env only** (`OPENFAULT_BACKUP_S3_*`), since the database being replaced may be gone. The previous database is kept as `openfault.db.pre-restore-<time>`.
+
+Restore steps: stop the server (`restore` refuses while `/healthz` answers), run `restore` with the env vars set (the Backups page shows the exact command for the latest backup), start the server. With Docker: `docker compose stop openfault && docker compose run --rm -e OPENFAULT_BACKUP_S3_ENDPOINT=… -e OPENFAULT_BACKUP_S3_REGION=… -e OPENFAULT_BACKUP_S3_BUCKET=… -e OPENFAULT_BACKUP_S3_ACCESS_KEY=… -e OPENFAULT_BACKUP_S3_SECRET_KEY=… openfault restore <key> && docker compose start openfault`.
 
 ## Memory and sizing
 

@@ -1,0 +1,27 @@
+<form method="post" action="/settings/backups" class="stack">
+  <input type="hidden" name="project" value="{{ v.project }}">
+  <fieldset{% if v.env %} disabled{% endif %}><legend>S3-compatible storage</legend>
+    <p class="hint">{% if v.env %}Set by environment (OPENFAULT_BACKUP_S3_*).{% else %}Once a day the database is snapshotted, compressed and uploaded. Works with Amazon S3, Cloudflare R2, MinIO and other S3-compatible stores.{% endif %}</p>
+    <label class="check"><input type="checkbox" name="enabled" value="1"{% if v.b.enabled %} checked{% endif %}> Daily backups on</label>
+    <div class="actions">
+      <label>Preset <select aria-label="Storage preset" onchange="if(this.value){var f=this.form;f.endpoint.value='https://s3.'+this.value+'.amazonaws.com';f.region.value=this.value;f.path_style.checked=false}"><option value="">Amazon S3 region…</option>{% for r in crate::ui::SES_REGIONS %}<option value="{{ r }}">Amazon S3 · {{ r }}</option>{% endfor %}</select></label>
+      <button type="button" class="secondary" onclick="var f=this.form;f.endpoint.value='https://&lt;account&gt;.r2.cloudflarestorage.com';f.region.value='auto';f.path_style.checked=true;f.endpoint.focus()">Cloudflare R2</button>
+    </div>
+    <label>Endpoint <input name="endpoint" type="url" value="{{ v.b.endpoint }}" placeholder="https://s3.us-east-1.amazonaws.com"><span class="hint">Leave empty for Amazon S3 in the region below. R2: https://&lt;account id&gt;.r2.cloudflarestorage.com</span></label>
+    <label>Region <input name="region" value="{{ v.b.region }}" placeholder="us-east-1"><span class="hint">R2 uses auto.</span></label>
+    <label>Bucket <input name="bucket" value="{{ v.b.bucket }}"></label>
+    <label>Prefix <input name="prefix" value="{{ v.b.prefix }}" placeholder="openfault/"></label>
+    <label>Access key <input name="access_key" value="{{ v.b.access_key }}" autocomplete="off"></label>
+    <label>Secret key <input name="secret_key" type="password" autocomplete="new-password"{% if v.secret_set %} placeholder="•••• set"{% endif %}><span class="hint">{% if v.secret_set %}•••• set. Type a new one to replace it, or leave blank to keep it.{% else %}Not set.{% endif %}</span></label>
+    <label>Hour (UTC) <input name="hour_utc" type="number" min="0" max="23" value="{{ v.b.hour_utc }}"></label>
+    <label>Keep <input name="keep" type="number" min="1" value="{{ v.b.keep }}"><span class="hint">Newest backups kept; older ones are deleted after each run.</span></label>
+    <label class="check"><input type="checkbox" name="path_style" value="1"{% if v.b.path_style %} checked{% endif %}> Path-style URLs (R2, MinIO)</label>
+  </fieldset>
+  {% if let Some((ok, m)) = v.result %}<p class="{% if *ok %}notice{% else %}error{% endif %}" role="status">{{ m }}</p>{% endif %}
+  <div class="actions"><button name="action" value="test" class="secondary" title="Saves, then writes and deletes a test object">Test connection</button><button name="action" value="now" class="secondary" title="Saves, then runs one backup">Back up now</button></div>
+  {% if v.project.is_empty() %}
+  <button name="action" value="save">Save</button>
+  {% else %}
+  <div class="actions"><button name="action" value="save">Finish</button><a class="btn ghost" href="/projects/{{ v.project }}/setup-sdk">Skip for now</a></div>
+  {% endif %}
+</form>

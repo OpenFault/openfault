@@ -1,5 +1,6 @@
 //! Issue emails: HTML (askama, autoescaped) + plain text, monochrome, one deep link.
 use super::{Info, base_url, fmt_time, label, one_line};
+use crate::db::Db;
 use askama::Template;
 
 #[derive(Template)]
@@ -21,9 +22,9 @@ pub fn subject(i: &Info) -> String {
     )
 }
 
-pub fn render(i: &Info) -> Result<(String, String), String> {
+pub fn render(db: &Db, i: &Info) -> Result<(String, String), String> {
     let (first, last) = (fmt_time(i.first_seen), fmt_time(i.last_seen));
-    let settings = format!("{}/settings/notifications", base_url());
+    let settings = format!("{}/settings/notifications", base_url(db));
     let text = format!(
         "{}: {}\n{}\n\nLevel: {}\nEvents: {}  Users: {}\nFirst seen: {first}\nLast seen: {last}\nRelease: {}\n\nOpen: {}\n\n--\nChange which emails you get: {settings}\n",
         label(&i.kind),
@@ -47,7 +48,7 @@ pub fn render(i: &Info) -> Result<(String, String), String> {
     Ok((text, html))
 }
 
-pub async fn send(i: &Info, to: &str) -> Result<(), String> {
-    let (text, html) = render(i)?;
-    crate::mail::try_send(to, &subject(i), &text, &html).await
+pub async fn send(db: &Db, i: &Info, to: &str) -> Result<(), String> {
+    let (text, html) = render(db, i)?;
+    crate::mail::try_send(db, to, &subject(i), &text, &html).await
 }

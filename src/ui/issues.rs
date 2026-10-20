@@ -331,6 +331,17 @@ async fn issue_project(st: &AppState, id: i64) -> Result<Option<i64>, E> {
         .await?)
 }
 
+/// Visible issue whose project `me` administers (org admin, project admin, or team admin).
+async fn can_delete(st: &AppState, me: &Me, id: i64) -> Result<(), E> {
+    check(st, me, id).await?;
+    let pid = issue_project(st, id).await?.ok_or_else(not_found)?;
+    if crate::teams::project_admin(&st.db, me, pid).await? {
+        Ok(())
+    } else {
+        Err(forbidden())
+    }
+}
+
 async fn check(st: &AppState, me: &Me, id: i64) -> Result<(), E> {
     match issue_project(st, id).await? {
         Some(p) if me.projects.iter().any(|x| x.id == p) => Ok(()),
@@ -517,10 +528,7 @@ struct DeletePage {
 }
 
 async fn delete_page(me: Me, State(st): State<AppState>, Path(id): Path<i64>) -> R {
-    check(&st, &me, id).await?;
-    if !me.is_admin() {
-        return Err(forbidden());
-    }
+    can_delete(&st, &me, id).await?;
     let d = svc::get_issue(&st.db, id)
         .await
         .map_err(E::from)?
@@ -540,10 +548,7 @@ async fn delete_page(me: Me, State(st): State<AppState>, Path(id): Path<i64>) ->
 }
 
 async fn delete(me: Me, State(st): State<AppState>, Path(id): Path<i64>) -> R {
-    check(&st, &me, id).await?;
-    if !me.is_admin() {
-        return Err(forbidden());
-    }
+    can_delete(&st, &me, id).await?;
     svc::apply_action(&st.db, id, me.id, IssueAction::Delete)
         .await
         .map_err(E::from)?;

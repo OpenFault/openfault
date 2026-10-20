@@ -3,7 +3,7 @@
 {% block content %}
 <div class="head"><h1>{{ project.name }}</h1><a class="btn secondary sm" href="/projects/{{ project.slug }}/issues">View issues {{ crate::ui::icon("arrow-right")|safe }}</a></div>
 {% include "settings_nav.html" %}
-{% if me.is_admin() %}{% include "project_nav.html" %}{% endif %}
+{% if can_admin %}{% include "project_nav.html" %}{% endif %}
 <div class="form-col">
 <section class="card sec">
   <h2>DSN</h2>
@@ -16,18 +16,18 @@
   {% for k in keys %}
   <tr{% if !k.active %} class="dim"{% endif %}>
     <td><b>{{ k.label }}</b></td><td class="muted">{{ crate::ui::t(k.created_at)|safe }}</td><td><code title="{{ k.dsn }}">{{ k.public_key_short }}</code></td>
-    <td class="num">{% if k.active %}{% if me.is_admin() %}<form method="post" action="/settings/projects/{{ project.slug }}/keys/{{ k.id }}/revoke" class="inline"><button class="ghost sm danger">Revoke</button></form>{% endif %}{% else %}<span class="pill">revoked</span>{% endif %}</td>
+    <td class="num">{% if k.active %}{% if can_admin %}<form method="post" action="/settings/projects/{{ project.slug }}/keys/{{ k.id }}/revoke" class="inline"><button class="ghost sm danger">Revoke</button></form>{% endif %}{% else %}<span class="pill">revoked</span>{% endif %}</td>
   </tr>
   {% endfor %}
   </tbody>
   </table></div>
-  {% if me.is_admin() %}
+  {% if can_admin %}
   <form method="post" action="/settings/projects/{{ project.slug }}/keys" class="inline">
     <input name="label" placeholder="Key label" aria-label="Key label" required> <button class="secondary sm">{{ crate::ui::icon("plus")|safe }}New key</button>
   </form>
   {% endif %}
 </section>
-{% if me.is_admin() %}
+{% if can_admin %}
 <section class="card sec">
   <h2>Project</h2>
   <form method="post" action="/settings/projects/{{ project.slug }}" class="stack">
@@ -40,6 +40,11 @@
   </form>
 </section>
 {% endif %}
+<section class="card sec">
+  <h2>Teams</h2>
+  {% if teams.is_empty() %}<p class="muted">No team includes this project. Add it from Settings → Teams.</p>{% else %}
+  <p>{% for t in teams %}<a class="pill" href="/settings/teams/{{ t.0 }}">{{ t.1 }}</a> {% endfor %}</p>{% endif %}
+</section>
 <section class="card sec">
   <h2>Quotas</h2>
   <dl class="kv">{% for q in quotas %}<dt>Per {{ q.0 }}</dt><dd>{{ q.1 }} events</dd>{% endfor %}</dl>

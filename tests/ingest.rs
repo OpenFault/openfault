@@ -324,3 +324,76 @@ async fn duplicate_event_counts_once() {
     assert!(rx.try_recv().is_ok());
     assert!(rx.try_recv().is_err(), "exactly one live tick");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn resolved_next_release_materializes() {
+    let (app, db, _dir) = setup().await;
+    let send = |id: &'static str, what: &'static str, rel: &'static str| {
+        let body = String::from_utf8(fixture("message.envelope"))
+            .unwrap()
+            .replace("394a", id)
+            .replace("Payment", what)
+            .replace("1.4.2", rel);
+        let app = app.clone();
+        async move {
+            assert_eq!(
+                post(&app, "/api/1/envelope/", body.into_bytes(), &[])
+                    .await
+                    .0,
+                StatusCode::OK
+            )
+        }
+    };
+    send("0001", "Payment", "1.0.0").await;
+    send("0002", "Refund", "1.0.0").await;
+    wait_processed(&db).await;
+    for id in [1, 2] {
+        openfault::issues::apply_action(
+            &db,
+            id,
+            1,
+            openfault::issues::IssueAction::Resolve {
+                in_release: None,
+                next_release: true,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    // Event from the baseline release is expected: no reopen, no activity.
+    send("0003", "Payment", "1.0.0").await;
+    wait_processed(&db).await;
+    assert_eq!(
+        count(
+            &db,
+            "SELECT count(*) FROM issues WHERE status = 'resolved' AND resolved_next_release = 1"
+        )
+        .await,
+        2
+    );
+    assert_eq!(count(&db, "SELECT count(*) FROM issue_activity WHERE kind IN ('regressed', 'resolved_in_release_materialized')").await, 0);
+    // 1.1.0 materializes both, then regresses issue 1.
+    send("0004", "Payment", "1.1.0").await;
+    wait_processed(&db).await;
+    assert_eq!(count(&db, "SELECT count(*) FROM issues WHERE id = 1 AND status = 'unresolved' AND resolved_in_release = '1.1.0'").await, 1);
+    assert_eq!(
+        count(
+            &db,
+            "SELECT count(*) FROM issue_activity WHERE issue_id = 1 AND kind = 'regressed'"
+        )
+        .await,
+        1
+    );
+    assert_eq!(
+        count(&db, "SELECT count(*) FROM issues WHERE id = 2 AND status = 'resolved' AND resolved_in_release = '1.1.0' AND resolved_next_release = 0 AND fixed_at_releases_json = '[\"1.1.0\"]'").await,
+        1
+    );
+    assert_eq!(
+        count(
+            &db,
+            "SELECT count(*) FROM issue_activity WHERE kind = 'resolved_in_release_materialized'"
+        )
+        .await,
+        2
+    );
+}

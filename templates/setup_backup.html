@@ -1,0 +1,7 @@
+{% extends "auth.html" %}
+{% block title %}Backups{% endblock %}
+{% block content %}
+<h1>Backups</h1>
+<p class="muted">Optional. Back up the database to S3-compatible storage once a day. You can change this later under Settings → Backups.</p>
+{% include "backup_form.html" %}
+{% endblock %}

@@ -1,0 +1,33 @@
+<form method="post" action="/settings/server" class="stack">
+  <input type="hidden" name="project" value="{{ v.project }}">
+  <fieldset{% if v.base_env %} disabled{% endif %}><legend>Base URL</legend>
+    <label>Public URL <input name="base_url" type="url" value="{{ v.base_url }}" placeholder="https://errors.example.com"><span class="hint">{% if v.base_env %}Set by environment (OPENFAULT_BASE_URL).{% else %}Used in DSNs and in email and push links.{% endif %}</span></label>
+  </fieldset>
+  <fieldset{% if v.smtp_env %} disabled{% endif %}><legend>Email (SMTP)</legend>
+    <p class="hint">{% if v.smtp_env %}Set by environment (OPENFAULT_SMTP_URL).{% else if v.smtp_on %}On.{% else %}Off: invites and resets show copyable links instead of sending email.{% endif %}{% if let Some(e) = v.smtp_error %} <span class="error">Ignored: {{ e }}</span>{% endif %}</p>
+    {% if !v.smtp_env %}<label>Preset <select aria-label="SMTP preset" onchange="if(this.value){var f=this.form;f.smtp_host.value='email-smtp.'+this.value+'.amazonaws.com';f.smtp_port.value='587';f.smtp_mode.value='starttls'}"><option value="">Other SMTP server</option>{% for r in crate::ui::SES_REGIONS %}<option value="{{ r }}">Amazon SES · {{ r }}</option>{% endfor %}</select><span class="hint">Amazon SES: use the SMTP credentials from the SES console, not your AWS keys.</span></label>{% endif %}
+    <label>Host <input name="smtp_host" value="{{ v.smtp.host }}" placeholder="smtp.example.com"><span class="hint">Leave empty to turn email off.</span></label>
+    <label>Port <input name="smtp_port" inputmode="numeric" value="{% if v.smtp.port != 0 %}{{ v.smtp.port }}{% endif %}" placeholder="587"></label>
+    <label>Security <select name="smtp_mode">{% for (m, l) in [("starttls", "STARTTLS"), ("tls", "TLS"), ("none", "None (local relay only)")] %}<option value="{{ m }}"{% if v.smtp.mode == *m %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+    {% if v.smtp.mode == "none" && !v.smtp.username.is_empty() %}<p class="error" role="status">Security is None: credentials will be sent unencrypted.</p>{% endif %}
+    <label>Username <input name="smtp_username" value="{{ v.smtp.username }}" autocomplete="off"></label>
+    <label>Password <input name="smtp_password" type="password" autocomplete="new-password"{% if v.smtp_pw_set %} placeholder="•••• set"{% endif %}><span class="hint">{% if v.smtp_pw_set %}•••• set. Type a new one to replace it, or leave blank to keep it.{% else %}Not set.{% endif %}</span></label>
+    <label>From <input name="smtp_from" value="{{ v.smtp.from }}" placeholder="OpenFault &lt;noreply@example.com&gt;"></label>
+  </fieldset>
+  {% if let Some((ok, m)) = v.test %}<p class="{% if *ok %}notice{% else %}error{% endif %}" role="status">{{ m }}</p>{% endif %}
+  <button name="action" value="test" class="secondary" title="Saves, then sends">Send test email to {{ v.to }}</button>
+  <fieldset{% if v.relay_env %} disabled{% endif %}><legend>Push relay</legend>
+    <p class="hint">{% if v.relay_env %}Set by environment (OPENFAULT_PUSH_RELAY_URL / _TOKEN).{% else %}Push to the OpenFault iOS app goes through a relay that holds the APNs key; only device tokens, the issue title and a link leave this server.{% endif %} <a href="https://openfault.dev/docs/push">Docs</a>. Status: {% if v.relay_on %}on{% else %}off{% endif %}.</p>
+    <label>Relay URL <input name="relay_url" type="url" value="{{ v.relay_url }}" placeholder="https://push.openfault.dev"></label>
+    <label>Relay token <input name="relay_token" type="password" autocomplete="new-password"{% if v.relay_token_set %} placeholder="•••• set"{% endif %}><span class="hint">{% if v.relay_token_set %}•••• set. Type a new one to replace it.{% else %}Not set.{% endif %}</span></label>
+  </fieldset>
+  {% if v.project.is_empty() %}
+  <fieldset{% if v.allow_env %} disabled{% endif %}><legend>Webhooks</legend>
+    <input type="hidden" name="has_allow" value="1">
+    <label class="check"><input type="checkbox" name="allow_private" value="1"{% if v.allow_private %} checked{% endif %}> Allow private webhook URLs (localhost, private IPs, plain http to loopback){% if v.allow_env %} · set by environment{% endif %}</label>
+  </fieldset>
+  <button name="action" value="save">Save</button>
+  {% else %}
+  <div class="actions"><button name="action" value="save">Continue</button><a class="btn ghost" href="/setup/backup?project={{ v.project }}">Skip for now</a></div>
+  {% endif %}
+</form>

@@ -148,7 +148,7 @@ async fn tv(mut me: Me, State(st): State<AppState>, h: HeaderMap, Query(q): Quer
         })
         .collect();
     let hour_ts: Vec<i64> = (0..12).map(|i| first + i * 300).collect();
-    let base = base_url(&h);
+    let base = base_url(&st, &h);
     let (scope, link) = match &me.scope {
         Some(p) => (
             format!("project:{}", p.id),

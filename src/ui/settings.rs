@@ -1,5 +1,5 @@
 //! Settings → MCP, Notifications and project Webhooks.
-use super::{Me, Project, R, admin, base_url, flash, not_found, project_for, render};
+use super::{Me, Project, R, admin_project_for, base_url, flash, not_found, render};
 use crate::{
     AppState,
     auth::CurrentUser,
@@ -46,8 +46,8 @@ struct Mcp {
     cursor: String,
 }
 
-async fn mcp(me: Me, h: HeaderMap) -> R {
-    let (claude, mcp_json, cursor) = crate::mcp::setup_snippets(&base_url(&h), "<your-token>");
+async fn mcp(me: Me, State(st): State<AppState>, h: HeaderMap) -> R {
+    let (claude, mcp_json, cursor) = crate::mcp::setup_snippets(&base_url(&st, &h), "<your-token>");
     render(Mcp {
         me,
         claude,
@@ -179,8 +179,7 @@ async fn webhooks_page(
 }
 
 async fn webhooks(me: Me, State(st): State<AppState>, Path(slug): Path<String>) -> R {
-    admin(&me)?;
-    let p = project_for(&st, &me, slug).await?;
+    let p = admin_project_for(&st, &me, slug).await?;
     webhooks_page(me, &st, p, None, "slack".into(), String::new()).await
 }
 
@@ -197,8 +196,7 @@ async fn create_webhook(
     Path(slug): Path<String>,
     Form(f): Form<HookForm>,
 ) -> R {
-    admin(&me)?;
-    let p = project_for(&st, &me, slug.clone()).await?;
+    let p = admin_project_for(&st, &me, slug.clone()).await?;
     let url = f.url.trim().to_string();
     match webhook::create(&st.db, p.id, &f.kind, &url, f.secret).await {
         Ok(_) => flash(
@@ -215,8 +213,7 @@ async fn webhook_action(
     Path((slug, id, action)): Path<(String, i64, String)>,
     Form(f): Form<Vec<(String, String)>>,
 ) -> R {
-    admin(&me)?;
-    let p = project_for(&st, &me, slug.clone()).await?;
+    let p = admin_project_for(&st, &me, slug.clone()).await?;
     let back = format!("/settings/projects/{slug}/webhooks");
     let found = match action.as_str() {
         "toggle" => {
@@ -303,8 +300,8 @@ async fn device_rows(st: &AppState, uid: i64) -> Result<Vec<DeviceRow>, super::E
         .await?)
 }
 
-fn pair_for(code: String, h: &HeaderMap) -> Pair {
-    let host = base_url(h);
+fn pair_for(st: &AppState, code: String, h: &HeaderMap) -> Pair {
+    let host = base_url(st, h);
     let qr = super::tv::qr(&format!(
         "openfault://pair?host={}&code={code}",
         super::enc(&host)
@@ -323,13 +320,13 @@ async fn devices(me: Me, State(st): State<AppState>) -> R {
 }
 
 async fn pair(me: Me, State(st): State<AppState>, h: HeaderMap) -> R {
-    let p = crate::pairing::start_pairing(&st.db, me.id, &base_url(&h))
+    let p = crate::pairing::start_pairing(&st.db, me.id, &base_url(&st, &h))
         .await
         .map_err(|crate::api::ApiErr(s, m)| super::E(s, m))?;
     let devices = device_rows(&st, me.id).await?;
     render(Devices {
         me,
-        pair: Some(pair_for(p.code, &h)),
+        pair: Some(pair_for(&st, p.code, &h)),
         notice: None,
         devices,
     })
@@ -356,7 +353,7 @@ async fn pair_status(
         })
         .await?;
     let (pair, notice) = match row {
-        Some((None, _)) => (Some(pair_for(code, &h)), None),
+        Some((None, _)) => (Some(pair_for(&st, code, &h)), None),
         Some((Some(_), name)) => (None, Some(format!("Paired: {}", name.unwrap_or_default()))),
         None => (None, Some("Pairing code expired".into())),
     };

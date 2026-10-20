@@ -92,7 +92,7 @@ async fn setup_invite_scoping_and_tokens() {
     .await;
     assert!(short.body.contains("at least 10"));
     let r = req(&app, "POST", "/setup", "", "org_name=Acme&name=Ann&email=ann%40acme.io&password=correct+horse&project_name=Web+App&platform=node", &[]).await;
-    assert_eq!(r.location, "/projects/web-app/setup-sdk");
+    assert_eq!(r.location, "/setup/email?project=web-app");
     let ann = r.cookie.unwrap();
     assert!(ann.starts_with("of_session="));
     let sdk = get("/projects/web-app/setup-sdk", ann.clone()).await;

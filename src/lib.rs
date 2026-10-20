@@ -1,5 +1,7 @@
 pub mod api;
 pub mod auth;
+pub mod backup;
+pub mod config;
 pub mod db;
 pub mod ingest;
 pub mod issues;
@@ -11,7 +13,9 @@ pub mod pairing;
 pub mod process;
 pub mod relay;
 pub mod scrub;
+pub mod setup;
 pub mod sourcemaps;
+pub mod teams;
 pub mod ui;
 
 use axum::{
@@ -34,15 +38,19 @@ pub struct AppState {
     pub quota: Arc<Mutex<HashMap<i64, VecDeque<i64>>>>,
     /// /login + /forgot attempts per client IP: (count, window_start).
     pub attempts: Arc<Mutex<HashMap<String, (u32, i64)>>>,
+    /// raw setup token while no user exists (shown on /setup), see src/setup.rs.
+    pub setup_token: Arc<tokio::sync::Mutex<Option<String>>>,
 }
 
 impl AppState {
     pub fn new(db: db::Db) -> Self {
+        config::get(&db);
         AppState {
             db,
             notify: Arc::new(Notify::new()),
             quota: Default::default(),
             attempts: Default::default(),
+            setup_token: Default::default(),
         }
     }
 }

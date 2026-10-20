@@ -74,8 +74,12 @@ pub fn cookie<'a>(h: &'a HeaderMap, name: &str) -> Option<&'a str> {
         .find_map(|kv| kv.trim().strip_prefix(name)?.strip_prefix('='))
 }
 
-fn secure() -> &'static str {
-    if std::env::var("OPENFAULT_BASE_URL").is_ok_and(|u| u.starts_with("https")) {
+fn secure(db: &crate::db::Db) -> &'static str {
+    if crate::config::get(db)
+        .base_url
+        .as_ref()
+        .is_some_and(|u| u.starts_with("https"))
+    {
         "; Secure"
     } else {
         ""
@@ -96,14 +100,14 @@ pub async fn login(st: &AppState, user_id: i64) -> crate::db::Result<String> {
         .await?;
     Ok(format!(
         "{COOKIE}={tok}; HttpOnly; SameSite=Lax; Path=/; Max-Age={SESSION_TTL}{}",
-        secure()
+        secure(&st.db)
     ))
 }
 
-pub fn clear_cookie() -> String {
+pub fn clear_cookie(db: &crate::db::Db) -> String {
     format!(
         "{COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0{}",
-        secure()
+        secure(db)
     )
 }
 

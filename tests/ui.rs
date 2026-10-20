@@ -522,11 +522,14 @@ async fn webhook_create_shows_validation_inline() {
         "POST",
         HOOKS,
         &c,
-        "kind=teams&url=https%3A%2F%2Fexample.com%2Fx",
+        "kind=pagerduty&url=https%3A%2F%2Fexample.com%2Fx",
         FORM,
     )
     .await;
-    assert!(r.body.contains("kind must be slack|discord|generic"));
+    assert!(
+        r.body
+            .contains("kind must be slack|discord|mattermost|teams|telegram|generic")
+    );
 }
 
 #[tokio::test]

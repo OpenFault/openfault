@@ -32,10 +32,17 @@ FROM scratch AS bin-arm64
 COPY --from=build /app/target/aarch64-unknown-linux-musl/release/openfault /openfault
 FROM bin-${TARGETARCH} AS bin
 
+FROM chef AS datadir
+RUN mkdir -p /tmp/data-dir
+
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=bin /openfault /openfault
+# Distroless has no shell: ship /data pre-owned by nonroot (65532) so a NEW named volume inherits it.
+# Bind mounts keep host ownership: run `chown 65532:65532 ./data` on the host.
+COPY --from=datadir --chown=65532:65532 /tmp/data-dir /data
 VOLUME /data
 ENV OPENFAULT_DATA=/data OPENFAULT_PORT=8080
 EXPOSE 8080
 USER nonroot
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 CMD ["/openfault", "healthcheck"]
 ENTRYPOINT ["/openfault"]

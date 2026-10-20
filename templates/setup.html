@@ -13,4 +13,5 @@
   <label>Platform <select name="platform">{% let current = "" %}{% include "platforms.html" %}</select></label>
   <button>Create</button>
 </form>
+{% if let Some(t) = token %}<p class="hint">Setting up with an agent or a script? {% if token_env %}Use the setup token from OPENFAULT_SETUP_TOKEN{% else %}Use this one-time setup token: <code>{{ t }}</code>{% endif %} as <code>Authorization: Bearer …</code> for <code>POST /api/v1/setup</code> or the MCP endpoint <code>/mcp</code> (tool <code>setup_instance</code>). It stops working once the owner exists.</p>{% endif %}
 {% endblock %}

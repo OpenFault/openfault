@@ -165,10 +165,36 @@ fn upsert_release(tx: &Transaction, pid: i64, version: &str, t: i64) -> rusqlite
         Some((a, b, c)) => (1, format!("{a:010}.{b:010}.{c:010}")),
         None => (0, format!("{t:020}")),
     };
-    tx.execute(
+    if tx.execute(
         "INSERT OR IGNORE INTO releases (project_id, version, is_semver, sort_key, first_seen) VALUES (?1, ?2, ?3, ?4, ?5)",
         params![pid, version, is_semver, key, t],
-    )?;
+    )? == 0
+    {
+        return Ok(());
+    }
+    // First sighting: materialize resolved-in-next-release for issues whose baseline sorts before it.
+    let pending = tx
+        .prepare("SELECT id, resolve_baseline FROM issues WHERE project_id = ?1 AND status = 'resolved' AND resolved_next_release = 1")?
+        .query_map([pid], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for (id, base) in pending {
+        // NULL baseline: resolved-next before resolve_baseline existed (pre-M7 DBs); any new release counts.
+        let newer = match &base {
+            Some(b) => release_before(tx, pid, b, version)?,
+            None => true,
+        };
+        if newer {
+            tx.execute(
+                "UPDATE issues SET resolved_in_release = ?2, resolved_next_release = 0,
+                   fixed_at_releases_json = json_insert(coalesce(fixed_at_releases_json, '[]'), '$[#]', ?2) WHERE id = ?1",
+                params![id, version],
+            )?;
+            tx.execute(
+                "INSERT INTO issue_activity (issue_id, kind, data_json, created_at) VALUES (?1, 'resolved_in_release_materialized', ?2, ?3)",
+                params![id, serde_json::json!({"release": version}).to_string(), t],
+            )?;
+        }
+    }
     Ok(())
 }
 
@@ -242,7 +268,7 @@ fn process_one(
     let (issue_id, prev_release, title) = match found {
         Some(id) => {
             #[allow(clippy::type_complexity)]
-            let (status, resolved_in, last_rel, mute_until, after, window, title): (
+            let (status, resolved_in, last_rel, mute_until, after, window, title, baseline): (
                 String,
                 Option<String>,
                 Option<String>,
@@ -250,10 +276,12 @@ fn process_one(
                 Option<i64>,
                 Option<i64>,
                 String,
+                Option<String>,
             ) = tx.query_row(
-                "SELECT status, resolved_in_release, last_release, mute_until, mute_after_count, mute_window_min, title FROM issues WHERE id = ?1",
+                "SELECT status, resolved_in_release, last_release, mute_until, mute_after_count, mute_window_min, title,
+                   CASE WHEN resolved_next_release THEN resolve_baseline END FROM issues WHERE id = ?1",
                 [id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?)),
             )?;
             if status == "muted" {
                 // ponytail: volume counts stored events (+ this one); above 25/hour sampling undercounts, use issue_hourly if that matters.
@@ -285,6 +313,8 @@ fn process_one(
             let regressed = status == "resolved"
                 && match (resolved_in.as_deref(), release) {
                     (Some(fixed), Some(r)) => !release_before(tx, pid, r, fixed)?,
+                    // Pending next-release: any newer release already materialized above, so this one is <= baseline.
+                    (None, Some(_)) if baseline.is_some() => false,
                     _ => true,
                 };
             if regressed {
@@ -439,16 +469,17 @@ pub fn expire_mutes(c: &Connection, t: i64) -> rusqlite::Result<usize> {
 /// Every 60s: expire mutes. Hourly: retention deletes in small batches, WAL checkpoint, incremental vacuum.
 pub async fn housekeeping(db: Db) {
     let mut tick = tokio::time::interval(Duration::from_secs(60));
-    let mut n = 0u64;
+    let mut last = 0;
     loop {
         tick.tick().await;
-        n = n.wrapping_add(1);
         if let Err(e) = db.write(|c| expire_mutes(c, now())).await {
             tracing::error!("mute expiry failed: {e}");
         }
-        if n % 60 != 1 {
+        // hourly by now() (not tick count) so the soak test's time offset drives it too.
+        if now() - last < 3600 {
             continue;
         }
+        last = now();
         let r = db
             .write(|c| {
                 let projects: Vec<(i64, i64)> = c

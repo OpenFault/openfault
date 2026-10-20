@@ -4,37 +4,11 @@ use super::{Info, label, one_line, webhook::HTTP};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-pub struct Relay {
-    pub url: String,
-    pub token: String,
-}
+pub use crate::config::Relay;
 
-/// OPENFAULT_PUSH_RELAY_URL + OPENFAULT_PUSH_RELAY_TOKEN; push is off unless both are set.
-pub fn relay() -> Option<Relay> {
-    let url = std::env::var("OPENFAULT_PUSH_RELAY_URL")
-        .ok()
-        .filter(|s| !s.is_empty())?;
-    let token = std::env::var("OPENFAULT_PUSH_RELAY_TOKEN")
-        .ok()
-        .filter(|s| !s.is_empty())?;
-    Some(Relay {
-        url: url.trim_end_matches('/').to_string(),
-        token,
-    })
-}
-
-/// For Settings → Organization: "off", or the relay URL push goes through.
-pub fn status() -> String {
-    match (
-        std::env::var("OPENFAULT_PUSH_RELAY_URL")
-            .ok()
-            .filter(|s| !s.is_empty()),
-        relay(),
-    ) {
-        (_, Some(r)) => format!("on via {}", r.url),
-        (Some(_), None) => "off: OPENFAULT_PUSH_RELAY_TOKEN missing".into(),
-        _ => "off".into(),
-    }
+/// Settings → Organization or OPENFAULT_PUSH_RELAY_URL + _TOKEN; push is off unless URL and token are set.
+pub fn relay(db: &crate::db::Db) -> Option<Relay> {
+    crate::config::get(db).relay.clone()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

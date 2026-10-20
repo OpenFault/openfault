@@ -549,13 +549,13 @@ pub async fn fix_approved(db: &Db, issue_id: i64) -> anyhow::Result<bool> {
         .unwrap_or(false))
 }
 
-/// `user_id` can see the issue's project (owner/admin: all; member: project_members), so may be assigned.
+/// `user_id` can see the issue's project (owner/admin: all; member: project_access = direct ∪ teams), so may be assigned.
 pub async fn assignable(db: &Db, issue_id: i64, user_id: i64) -> anyhow::Result<bool> {
     Ok(db
         .read(move |c| {
             c.query_row(
                 "SELECT EXISTS (SELECT 1 FROM users u, issues i WHERE u.id = ?2 AND i.id = ?1 AND (u.role != 'member'
-                   OR i.project_id IN (SELECT project_id FROM project_members WHERE user_id = u.id)))",
+                   OR i.project_id IN (SELECT project_id FROM project_access WHERE user_id = u.id)))",
                 params![issue_id, user_id],
                 |r| r.get(0),
             )
@@ -786,7 +786,11 @@ pub async fn apply_action(
             };
             match &action {
                 IssueAction::Resolve { in_release, next_release } => up(
-                    "UPDATE issues SET status = 'resolved', resolved_in_release = ?2, resolved_next_release = ?3,
+                    // next_release with no releases yet = plain resolve; baseline = latest release now.
+                    "UPDATE issues SET status = 'resolved', resolved_in_release = ?2,
+                       resolved_next_release = ?3 AND EXISTS (SELECT 1 FROM releases WHERE project_id = issues.project_id),
+                       resolve_baseline = CASE WHEN ?3 THEN (SELECT version FROM releases WHERE project_id = issues.project_id
+                         ORDER BY is_semver DESC, sort_key DESC LIMIT 1) END,
                        mute_until = NULL, mute_after_count = NULL, mute_window_min = NULL WHERE id = ?1",
                     &[in_release, next_release],
                 )?,

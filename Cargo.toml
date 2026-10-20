@@ -8,7 +8,7 @@ license = "MIT"
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "time", "net"] }
 tower-http = { version = "0.6", features = ["decompression-gzip", "decompression-br", "decompression-deflate", "decompression-zstd", "limit", "trace", "compression-gzip"] }
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled", "backup"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 blake3 = "1"

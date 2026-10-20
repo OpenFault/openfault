@@ -1,0 +1,22 @@
+{% extends "app.html" %}
+{% block title %}Teams{% endblock %}
+{% block content %}
+<div class="head"><h1>Settings</h1></div>
+{% include "settings_nav.html" %}
+<div class="form-col">
+{% if teams.is_empty() %}<div class="empty">{{ crate::ui::icon("user-circle")|safe }}<p>{% if me.is_admin() %}No teams yet. A team groups people and gives them access to its projects.{% else %}You're not in any team yet.{% endif %}</p></div>{% else %}
+<div class="tbl"><table class="rt"><thead><tr><th>Team</th><th>Members</th><th>Projects</th><th>Your role</th></tr></thead><tbody>
+{% for t in teams %}<tr><td><a href="/settings/teams/{{ t.slug }}"><b>{{ t.name }}</b></a></td><td class="muted">{{ t.members }}</td><td class="muted">{{ t.projects }}</td><td>{% if let Some(r) = t.role %}<span class="pill">{{ r }}</span>{% endif %}</td></tr>{% endfor %}
+</tbody></table></div>{% endif %}
+{% if me.is_admin() %}
+<section class="card sec">
+  <h2>New team</h2>
+  {% if let Some(e) = error %}<p class="error">{{ e }}</p>{% endif %}
+  <form method="post" action="/settings/teams" class="stack">
+    <label>Name <input name="name" required placeholder="Backend"></label>
+    <button>{{ crate::ui::icon("plus")|safe }}Create team</button>
+  </form>
+</section>
+{% endif %}
+</div>
+{% endblock %}

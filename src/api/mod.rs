@@ -11,7 +11,7 @@ use axum::{
     extract::{FromRequestParts, Path, Query, State},
     http::{StatusCode, header, request::Parts},
     response::{IntoResponse, Response},
-    routing::{delete, get},
+    routing::{delete, get, post},
 };
 use rusqlite::{OptionalExtension, params};
 use serde::Deserialize;
@@ -34,7 +34,9 @@ pub fn routes() -> Router<AppState> {
         .route("/me/notifications", get(get_prefs).put(put_prefs))
         .route("/me/devices", get(list_devices).post(add_device))
         .route("/me/devices/{id}", delete(del_device).patch(patch_device))
+        .route("/setup", post(crate::setup::rest))
         .merge(crate::pairing::routes())
+        .merge(crate::teams::api_routes())
 }
 
 pub struct ApiErr(pub StatusCode, pub String);
@@ -363,7 +365,7 @@ async fn members(s: Scope, State(st): State<AppState>, Path(slug): Path<String>)
         .read(move |c| {
             c.prepare(
                 "SELECT id, name, email, role FROM users WHERE role != 'member'
-                   OR id IN (SELECT user_id FROM project_members WHERE project_id = ?1) ORDER BY name, email",
+                   OR id IN (SELECT user_id FROM project_access WHERE project_id = ?1) ORDER BY name, email",
             )?
             .query_map([pid], |r| {
                 Ok(json!({"id": r.get::<_, i64>(0)?, "name": r.get::<_, String>(1)?,
@@ -383,10 +385,14 @@ async fn act(
     body: Result<Json<IssueAction>, axum::extract::rejection::JsonRejection>,
 ) -> R {
     s.writer()?;
-    s.issue_project(&st, id).await?;
+    let pid = s.issue_project(&st, id).await?;
     let Json(a) = body.map_err(|e| err(StatusCode::UNPROCESSABLE_ENTITY, &e.body_text()))?;
     let deleted = matches!(a, IssueAction::Delete);
-    if deleted && !s.user.is_admin() {
+    if deleted
+        && !crate::teams::project_admin(&st.db, &s.user, pid)
+            .await
+            .map_err(internal)?
+    {
         return Err(err(
             StatusCode::FORBIDDEN,
             "only owners and admins can delete issues",

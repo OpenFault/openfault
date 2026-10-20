@@ -13,11 +13,12 @@
 </section>
 <section class="card sec">
   <h2>Server</h2>
-  <dl class="kv">
-    <dt>Base URL</dt><dd>{{ base_url }}<div class="hint">Used in DSNs and email links. Set it with the base URL environment variable when running behind a proxy.</div></dd>
-    <dt>Email</dt><dd>{% if smtp %}SMTP configured{% else %}<span class="muted">Not configured</span><div class="hint">Invites and resets show copyable links instead of sending email.</div>{% endif %}</dd>
-    <dt>Push relay</dt><dd>{% if push.starts_with("on") %}{{ push }}{% else %}<span class="muted">{{ push }}</span>{% endif %}<div class="hint">Push to the iOS app goes through the relay set by OPENFAULT_PUSH_RELAY_URL and OPENFAULT_PUSH_RELAY_TOKEN.</div></dd>
-  </dl>
+  {% include "server_form.html" %}
 </section>
+{% if !v.mails.is_empty() %}<section class="card sec">
+  <h2>Recent email</h2>
+  <div class="tbl"><table class="rt"><thead><tr><th>When</th><th>To</th><th>Subject</th><th>Result</th></tr></thead>
+  <tbody>{% for (t, to, subj, err) in v.mails %}<tr><td class="muted">{{ crate::ui::ago(t) }}</td><td>{{ to }}</td><td>{{ subj }}</td><td>{% if let Some(e) = err %}<span class="error">{{ e }}</span>{% else %}<span class="notice">sent</span>{% endif %}</td></tr>{% endfor %}</tbody></table></div>
+</section>{% endif %}
 </div>
 {% endblock %}

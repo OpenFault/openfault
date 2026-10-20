@@ -1,0 +1,48 @@
+{% extends "app.html" %}
+{% block title %}{{ team.name }}{% endblock %}
+{% block content %}
+<div class="head"><h1>{{ team.name }}</h1><a class="btn secondary sm" href="/settings/teams">All teams</a></div>
+{% include "settings_nav.html" %}
+<div class="form-col">
+<section class="card sec">
+  <h2>Members</h2>
+  {% if members.is_empty() %}<p class="muted">No members yet.</p>{% else %}
+  <div class="tbl"><table class="rt"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr></thead><tbody>
+  {% for m in members %}<tr>
+    <td><span class="avatar s">{{ crate::ui::initials(m.name, m.email) }}</span> {{ m.name }}</td><td class="muted">{{ m.email }}</td>
+    <td>{% if team.manage %}<form method="post" action="/settings/teams/{{ team.slug }}/members" class="inline"><input type="hidden" name="user_id" value="{{ m.id }}">
+      <select name="role" aria-label="Team role">{% for r in ["admin", "member"] %}<option{% if *r == m.role.as_str() %} selected{% endif %}>{{ r }}</option>{% endfor %}</select>
+      <button class="secondary sm">Change</button></form>{% else %}<span class="pill">{{ m.role }}</span>{% endif %}</td>
+    <td class="num">{% if team.manage %}<form method="post" action="/settings/teams/{{ team.slug }}/members/{{ m.id }}/remove" class="inline"><button class="ghost sm danger">Remove</button></form>{% endif %}</td>
+  </tr>{% endfor %}
+  </tbody></table></div>{% endif %}
+  {% if team.manage && !others.is_empty() %}
+  <form method="post" action="/settings/teams/{{ team.slug }}/members" class="inline" style="margin-top:12px">
+    <select name="user_id" aria-label="Member">{% for o in others %}<option value="{{ o.0 }}">{{ o.1 }}</option>{% endfor %}</select>
+    <select name="role" aria-label="Role"><option>member</option><option>admin</option></select>
+    <button class="secondary sm">{{ crate::ui::icon("plus")|safe }}Add member</button>
+  </form>{% endif %}
+</section>
+<section class="card sec">
+  <h2>Projects</h2>
+  <p class="muted sm">Members see these projects. Team admins administer them.</p>
+  {% if projects.is_empty() %}<p class="muted">No projects yet.</p>{% else %}
+  <div class="tbl"><table class="rt"><tbody>
+  {% for p in projects %}<tr><td><a href="/settings/projects/{{ p.1 }}"><b>{{ p.2 }}</b></a></td>
+    <td class="num">{% if team.manage %}<form method="post" action="/settings/teams/{{ team.slug }}/projects/{{ p.0 }}/remove" class="inline"><button class="ghost sm danger">Remove</button></form>{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div>{% endif %}
+  {% if team.manage && !addable.is_empty() %}
+  <form method="post" action="/settings/teams/{{ team.slug }}/projects" class="inline" style="margin-top:12px">
+    <select name="project_id" aria-label="Project">{% for p in addable %}<option value="{{ p.0 }}">{{ p.1 }}</option>{% endfor %}</select>
+    <button class="secondary sm">{{ crate::ui::icon("plus")|safe }}Add project</button>
+  </form>{% endif %}
+</section>
+{% if me.is_admin() %}
+<section class="card sec">
+  <h2>Delete team</h2>
+  <p class="muted sm">Members keep any direct project access; access through this team ends.</p>
+  <form method="post" action="/settings/teams/{{ team.slug }}/delete" class="inline"><button class="secondary sm danger">Delete {{ team.name }}</button></form>
+</section>
+{% endif %}
+</div>
+{% endblock %}

@@ -1,4 +1,5 @@
-//! Per-project webhooks: Slack (blocks), Discord (embeds), generic JSON (+ optional HMAC-SHA256).
+//! Per-project webhooks: Slack (blocks), Discord (embeds), Mattermost (attachments), Teams (Adaptive Card),
+//! Telegram (Bot API sendMessage), generic JSON (+ optional HMAC-SHA256).
 use super::{Info, fmt_time, label, one_line};
 use crate::db::{Db, now};
 use rusqlite::{Connection, params};
@@ -8,7 +9,14 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::LazyLock;
 use std::time::Duration;
 
-pub const KINDS: [&str; 3] = ["slack", "discord", "generic"];
+pub const KINDS: [&str; 6] = [
+    "slack",
+    "discord",
+    "mattermost",
+    "teams",
+    "telegram",
+    "generic",
+];
 
 /// Push relay client (operator-configured URL, may be private). No redirects.
 pub static HTTP: LazyLock<reqwest::Client> = LazyLock::new(|| client(false));
@@ -29,8 +37,10 @@ fn client(public_only: bool) -> reqwest::Client {
     b.build().expect("http client")
 }
 
+/// OPENFAULT_ALLOW_PRIVATE_WEBHOOKS=1 or the org setting (mirrored by `config::get`).
 fn allow_private() -> bool {
     std::env::var("OPENFAULT_ALLOW_PRIVATE_WEBHOOKS").as_deref() == Ok("1")
+        || crate::config::ALLOW_PRIVATE.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// ponytail: an HTTP(S)_PROXY env var bypasses this (the proxy resolves the host).
@@ -56,6 +66,8 @@ pub struct Hook {
     pub kind: String,
     pub url: String,
     pub secret: Option<String>,
+    /// JSON with per-kind settings; telegram: `{"chat_id": …}`.
+    pub extra: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -122,7 +134,7 @@ pub fn validate_url(u: &str) -> Result<reqwest::Url, String> {
         }
     };
     if private && !allow {
-        return Err("private, local and loopback addresses are not allowed (set OPENFAULT_ALLOW_PRIVATE_WEBHOOKS=1)".into());
+        return Err("private, local and loopback addresses are not allowed (allow private webhooks in Settings → Organization)".into());
     }
     match url.scheme() {
         "https" => Ok(url),
@@ -139,15 +151,28 @@ pub async fn create(
     secret: Option<String>,
 ) -> Result<i64, String> {
     if !KINDS.contains(&kind) {
-        return Err("kind must be slack|discord|generic".into());
+        return Err(format!("kind must be {}", KINDS.join("|")));
     }
-    validate_url(url)?;
-    let (kind, url) = (kind.to_string(), url.to_string());
+    let mut parsed = validate_url(url)?;
+    // ponytail: telegram's chat id rides in the URL (`…/sendMessage?chat_id=…`, which Telegram itself
+    // accepts) and is moved to `extra`, so the add-webhook form needs no extra field.
+    let mut extra = None;
+    if kind == "telegram" {
+        let chat = parsed
+            .query_pairs()
+            .find(|(k, _)| k == "chat_id")
+            .map(|(_, v)| v.into_owned())
+            .filter(|v| !v.is_empty())
+            .ok_or("telegram URL needs ?chat_id=<chat id>")?;
+        parsed.set_query(None);
+        extra = Some(json!({ "chat_id": chat }).to_string());
+    }
+    let (kind, url) = (kind.to_string(), parsed.to_string());
     let secret = secret.filter(|s| !s.is_empty());
     db.write(move |c| {
         c.execute(
-            "INSERT INTO webhooks (project_id, kind, url, secret) VALUES (?1, ?2, ?3, ?4)",
-            params![project_id, kind, url, secret],
+            "INSERT INTO webhooks (project_id, kind, url, secret, extra) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![project_id, kind, url, secret, extra],
         )?;
         Ok(c.last_insert_rowid())
     })
@@ -204,8 +229,8 @@ pub async fn delete(db: &Db, project_id: i64, id: i64) -> crate::db::Result<bool
 }
 
 pub(super) fn enabled(c: &Connection, project_id: i64) -> rusqlite::Result<Vec<Hook>> {
-    c.prepare("SELECT id, kind, url, secret FROM webhooks WHERE project_id = ?1 AND enabled = 1 ORDER BY id")?
-        .query_map([project_id], |r| Ok(Hook { id: r.get(0)?, kind: r.get(1)?, url: r.get(2)?, secret: r.get(3)? }))?
+    c.prepare("SELECT id, kind, url, secret, extra FROM webhooks WHERE project_id = ?1 AND enabled = 1 ORDER BY id")?
+        .query_map([project_id], |r| Ok(Hook { id: r.get(0)?, kind: r.get(1)?, url: r.get(2)?, secret: r.get(3)?, extra: r.get(4)? }))?
         .collect()
 }
 
@@ -223,7 +248,7 @@ pub(super) fn record(c: &Connection, id: i64, err: Option<&str>, t: i64) -> rusq
     Ok(())
 }
 
-/// Slack mrkdwn: escape the three control characters so `<!channel>` etc. can't be injected.
+/// Slack mrkdwn / Telegram HTML: escape the three control characters so `<!channel>`, tags etc. can't be injected.
 fn slack_esc(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -266,6 +291,54 @@ pub fn body(kind: &str, i: &Info) -> Value {
                 }]
             })
         }
+        "mattermost" => {
+            let f =
+                |k: &str, v: String| json!({"short": true, "title": k, "value": one_line(&v, 300)});
+            json!({
+                "text": one_line(&head, 300),
+                "attachments": [{
+                    "fallback": one_line(&head, 300),
+                    "color": if i.level == "error" || i.level == "fatal" { "#d73a49" } else { "#808080" },
+                    "title": one_line(&head, 256),
+                    "title_link": i.url,
+                    "fields": [
+                        f("Level", i.level.clone()), f("Events", i.events.to_string()),
+                        f("Users", i.users.to_string()), f("Release", release),
+                    ],
+                }]
+            })
+        }
+        "teams" => {
+            let f = |k: &str, v: String| json!({"title": k, "value": one_line(&v, 300)});
+            json!({
+                "type": "message",
+                "attachments": [{
+                    "contentType": "application/vnd.microsoft.card.adaptive",
+                    "content": {
+                        "type": "AdaptiveCard",
+                        "version": "1.4",
+                        "body": [
+                            {"type": "TextBlock", "text": one_line(&head, 300), "weight": "Bolder", "wrap": true},
+                            {"type": "FactSet", "facts": [
+                                f("Level", i.level.clone()), f("Events", i.events.to_string()),
+                                f("Users", i.users.to_string()), f("Release", release),
+                            ]},
+                        ],
+                        "actions": [{"type": "Action.OpenUrl", "title": "Open issue", "url": i.url}],
+                    }
+                }]
+            })
+        }
+        // chat_id is added in `send` from the hook's `extra`.
+        "telegram" => json!({
+            "text": format!(
+                "<b>{}</b>\n<code>{}</code>\nLevel: {} · Events: {} · Users: {} · Release: {}\n{}",
+                slack_esc(&one_line(&head, 300)), slack_esc(&one_line(&i.culprit, 300)),
+                slack_esc(&i.level), i.events, i.users, slack_esc(&one_line(&release, 100)), slack_esc(&i.url),
+            ),
+            "parse_mode": "HTML",
+            "disable_web_page_preview": true,
+        }),
         _ => json!({
             "kind": i.kind,
             "project": i.project,
@@ -287,7 +360,12 @@ pub fn signature(secret: &str, body: &[u8]) -> String {
 
 pub async fn send(h: &Hook, i: &Info) -> Result<(), String> {
     let url = validate_url(&h.url)?;
-    let body = serde_json::to_vec(&body(&h.kind, i)).map_err(|e| e.to_string())?;
+    let mut v = body(&h.kind, i);
+    if h.kind == "telegram" {
+        let x: Value = serde_json::from_str(h.extra.as_deref().unwrap_or("{}")).unwrap_or_default();
+        v["chat_id"] = x["chat_id"].clone();
+    }
+    let body = serde_json::to_vec(&v).map_err(|e| e.to_string())?;
     let mut req = HOOKS.post(url).header("content-type", "application/json");
     if let Some(s) = &h.secret {
         // signed "{ts}.{body}" so a captured request can't be replayed later with a fresh timestamp.
@@ -314,9 +392,9 @@ pub async fn test_webhook(db: &Db, id: i64) -> Result<(), String> {
     let hook = db
         .read(move |c| {
             c.query_row(
-                "SELECT h.id, h.kind, h.url, h.secret, p.name FROM webhooks h JOIN projects p ON p.id = h.project_id WHERE h.id = ?1",
+                "SELECT h.id, h.kind, h.url, h.secret, h.extra, p.name FROM webhooks h JOIN projects p ON p.id = h.project_id WHERE h.id = ?1",
                 [id],
-                |r| Ok((Hook { id: r.get(0)?, kind: r.get(1)?, url: r.get(2)?, secret: r.get(3)? }, r.get::<_, String>(4)?)),
+                |r| Ok((Hook { id: r.get(0)?, kind: r.get(1)?, url: r.get(2)?, secret: r.get(3)?, extra: r.get(4)? }, r.get::<_, String>(5)?)),
             )
         })
         .await
@@ -330,7 +408,7 @@ pub async fn test_webhook(db: &Db, id: i64) -> Result<(), String> {
         title: "Test notification from OpenFault".into(),
         culprit: "openfault.test".into(),
         level: "info".into(),
-        url: format!("{}/settings", super::base_url()),
+        url: format!("{}/settings", super::base_url(db)),
         events: 1,
         users: 1,
         first_seen: t,
@@ -352,6 +430,7 @@ mod tests {
     #[test]
     fn url_rules() {
         assert!(validate_url("https://hooks.slack.com/services/x").is_ok());
+        assert!(validate_url("https://api.telegram.org/bot1:abc/sendMessage").is_ok());
         for bad in [
             "http://example.com/x",
             "https://localhost/x",

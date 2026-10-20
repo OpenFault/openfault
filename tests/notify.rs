@@ -100,7 +100,7 @@ async fn pipeline_email_webhook_push_dedupe_prefs() {
     notify::set_prefs(&t.db, 1, all_push.clone()).await.unwrap();
     assert_eq!(notify::prefs_for(&t.db, 1).await.unwrap().len(), 4);
     assert!(
-        notify::webhook::create(&t.db, 1, "teams", &format!("{base}/hook"), None)
+        notify::webhook::create(&t.db, 1, "pagerduty", &format!("{base}/hook"), None)
             .await
             .is_err()
     );
@@ -344,4 +344,86 @@ async fn failed_webhook_backs_off_and_queue_is_capped() {
     assert_eq!(total, notify::MAX_PENDING);
     let h = notify::project_health(&t.db, 1).await.unwrap();
     assert_eq!((h.queued, h.dropped), (notify::MAX_PENDING, 6));
+}
+
+#[tokio::test]
+async fn mattermost_teams_telegram_payloads() {
+    let (base, seen) = stub().await;
+    unsafe { std::env::set_var("OPENFAULT_ALLOW_PRIVATE_WEBHOOKS", "1") };
+    let t = setup().await;
+    let hook = format!("{base}/hook");
+    assert!(
+        notify::webhook::create(&t.db, 1, "telegram", &hook, None)
+            .await
+            .is_err(),
+        "telegram needs a chat_id"
+    );
+    for (kind, url) in [
+        ("mattermost", hook.clone()),
+        ("teams", hook.clone()),
+        ("telegram", format!("{hook}?chat_id=-100123")),
+    ] {
+        let id = notify::webhook::create(&t.db, 1, kind, &url, None)
+            .await
+            .unwrap();
+        notify::webhook::test_webhook(&t.db, id).await.unwrap();
+        let v = seen.lock().unwrap().pop().unwrap().2;
+        match kind {
+            "mattermost" => {
+                let a = &v["attachments"][0];
+                assert!(v["text"].is_string());
+                for k in ["fallback", "color", "title", "title_link"] {
+                    assert!(a[k].is_string(), "{k}");
+                }
+                let f = &a["fields"][0];
+                assert!(
+                    f["short"].is_boolean() && f["title"].is_string() && f["value"].is_string()
+                );
+            }
+            "teams" => {
+                assert_eq!(v["type"], "message");
+                let a = &v["attachments"][0];
+                assert_eq!(a["contentType"], "application/vnd.microsoft.card.adaptive");
+                let c = &a["content"];
+                assert_eq!(
+                    (c["type"].as_str(), c["version"].as_str()),
+                    (Some("AdaptiveCard"), Some("1.4"))
+                );
+                assert_eq!(c["body"][0]["type"], "TextBlock");
+                assert_eq!(c["body"][1]["type"], "FactSet");
+                assert!(c["body"][1]["facts"][0]["title"].is_string());
+                assert_eq!(c["actions"][0]["type"], "Action.OpenUrl");
+                assert!(c["actions"][0]["url"].is_string());
+            }
+            _ => {
+                assert_eq!(v["chat_id"], "-100123");
+                assert_eq!(v["parse_mode"], "HTML");
+                assert_eq!(v["disable_web_page_preview"], true);
+                assert!(v["text"].as_str().unwrap().contains("Test notification"));
+            }
+        }
+    }
+    let rows = notify::webhook::list(&t.db, 1).await.unwrap();
+    assert!(rows.iter().all(|r| !r.url.contains("chat_id")));
+
+    let info = notify::Info {
+        kind: "new_issue".into(),
+        project: "p".into(),
+        id: 1,
+        title: "<script>alert(1)</script> & co".into(),
+        culprit: "a<b>".into(),
+        level: "error".into(),
+        url: "https://x.test/issues/1".into(),
+        events: 1,
+        users: 1,
+        first_seen: 0,
+        last_seen: 0,
+        release: None,
+    };
+    let text = notify::webhook::body("telegram", &info)["text"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(!text.contains("<script>") && !text.contains("a<b>"));
+    assert!(text.contains("&lt;script&gt;alert(1)&lt;/script&gt; &amp; co"));
 }
