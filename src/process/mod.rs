@@ -1,6 +1,7 @@
 //! Inbox → issues/events. One loop, batches of ≤100 in one write transaction.
 pub mod group;
 pub mod normalize;
+pub mod symbolicate;
 
 use crate::db::{Db, now};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
@@ -48,7 +49,22 @@ pub fn process_batch(c: &mut Connection) -> rusqlite::Result<usize> {
             .ok()
             .and_then(|b| serde_json::from_slice::<Value>(&b).ok());
         match ev {
-            Some(ev) => process_one(&tx, *pid, *received, &ev, body)?,
+            Some(mut ev) => {
+                // before grouping so hashes use resolved names; re-encode only if frames changed.
+                symbolicate::symbolicate(&tx, *pid, &mut ev);
+                // re-encode failure keeps the original payload rather than storing an empty one.
+                let resolved = ev
+                    .get("symbolicated")
+                    .and_then(|_| serde_json::to_vec(&ev).ok())
+                    .and_then(|j| zstd::encode_all(&j[..], 3).ok());
+                process_one(
+                    &tx,
+                    *pid,
+                    *received,
+                    &ev,
+                    resolved.as_deref().unwrap_or(body),
+                )?
+            }
             None => tracing::warn!(project_id = pid, "dropping undecodable inbox row"),
         }
     }
@@ -238,6 +254,16 @@ fn process_one(
     Ok(())
 }
 
+/// Expired auth rows and abandoned upload chunks.
+pub fn purge(c: &Connection, t: i64) -> rusqlite::Result<()> {
+    c.execute("DELETE FROM sessions WHERE expires_at < ?1", [t])?;
+    // ponytail: rows are deleted on use, so "used" resets are already gone.
+    c.execute("DELETE FROM password_resets WHERE expires_at < ?1", [t])?;
+    c.execute("DELETE FROM invites WHERE expires_at < ?1", [t - 7 * 86400])?;
+    c.execute("DELETE FROM chunks WHERE created_at < ?1", [t - 3600])?;
+    Ok(())
+}
+
 /// Hourly: retention deletes in small batches, WAL checkpoint, incremental vacuum.
 pub async fn housekeeping(db: Db) {
     let mut tick = tokio::time::interval(Duration::from_secs(3600));
@@ -263,6 +289,7 @@ pub async fn housekeeping(db: Db) {
                         }
                     }
                 }
+                purge(c, now())?;
                 c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
                 c.execute_batch("PRAGMA incremental_vacuum;")?;
                 Ok(deleted)
@@ -277,6 +304,24 @@ pub async fn housekeeping(db: Db) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn purge_drops_expired_sessions() {
+        let c = rusqlite::Connection::open_in_memory().unwrap();
+        c.execute_batch(include_str!("../schema.sql")).unwrap();
+        c.execute_batch(
+            "INSERT INTO users (id, email, pw_hash, role, created_at) VALUES (1, 'a@b.c', 'x', 'admin', 0);
+             INSERT INTO sessions (id_hash, user_id, expires_at) VALUES ('old', 1, 99), ('new', 1, 101);",
+        )
+        .unwrap();
+        super::purge(&c, 100).unwrap();
+        let left: String = c
+            .query_row("SELECT group_concat(id_hash) FROM sessions", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(left, "new");
+    }
+
     #[test]
     fn semver_parse() {
         assert_eq!(super::semver("v1.2.3"), Some((1, 2, 3)));

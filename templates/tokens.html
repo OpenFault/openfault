@@ -1,0 +1,26 @@
+{% extends "app.html" %}
+{% block title %}API tokens{% endblock %}
+{% block content %}
+<h1>API tokens</h1>
+{% include "settings_nav.html" %}
+{% if let Some(t) = new_token %}
+<p>Copy this token now. It will not be shown again.</p>
+<pre><code>{{ t }}</code></pre>
+{% endif %}
+<table>
+<thead><tr><th>Label</th><th>Scope</th><th>Project</th><th>Last used</th><th></th></tr></thead>
+<tbody>
+{% for t in tokens %}
+<tr><td>{{ t.label }}</td><td>{{ t.scopes }}</td><td>{{ t.project }}</td><td>{{ t.last_used }}</td>
+<td><form method="post" action="/settings/tokens/{{ t.id }}/revoke" class="inline"><button class="secondary">Revoke</button></form></td></tr>
+{% endfor %}
+</tbody>
+</table>
+<h2>New token</h2>
+<form method="post" action="/settings/tokens" class="stack">
+  <label>Label <input name="label" required></label>
+  <label>Scope <select name="scope"><option>read</option><option>write</option></select></label>
+  <label>Project <select name="project"><option value="">All my projects</option>{% for p in projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select></label>
+  <button>Create token</button>
+</form>
+{% endblock %}

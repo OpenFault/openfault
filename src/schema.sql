@@ -7,13 +7,16 @@ CREATE TABLE IF NOT EXISTS orgs (
   settings_json TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT NOT NULL DEFAULT '',
-  pw_hash TEXT NOT NULL, is_owner INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+  pw_hash TEXT NOT NULL, is_owner INTEGER NOT NULL DEFAULT 0, role TEXT NOT NULL DEFAULT 'member', -- owner|admin|member
+  created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions (
   id_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   expires_at INTEGER NOT NULL, ua TEXT);
 CREATE TABLE IF NOT EXISTS invites (
   token_hash TEXT PRIMARY KEY, email TEXT NOT NULL, role TEXT NOT NULL, project_ids_json TEXT NOT NULL DEFAULT '[]',
   invited_by INTEGER REFERENCES users(id), expires_at INTEGER NOT NULL, accepted_at INTEGER);
+CREATE TABLE IF NOT EXISTS password_resets (
+  token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS projects (
   id INTEGER PRIMARY KEY, org_id INTEGER NOT NULL REFERENCES orgs(id), slug TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
   platform TEXT, settings_json TEXT NOT NULL DEFAULT '{}', retention_days INTEGER NOT NULL DEFAULT 90,
@@ -67,6 +70,9 @@ CREATE TABLE IF NOT EXISTS issue_activity (
 CREATE TABLE IF NOT EXISTS artifact_bundles (
   id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, debug_id TEXT NOT NULL,
   minified_cache BLOB, map_cache BLOB, created_at INTEGER NOT NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS artifact_bundles_debug ON artifact_bundles(project_id, debug_id);
+-- sentry-cli chunk-upload staging; rows are deleted once assembled.
+CREATE TABLE IF NOT EXISTS chunks (sha1 TEXT PRIMARY KEY, data BLOB NOT NULL, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS devices (
   id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, platform TEXT NOT NULL,
   push_token TEXT NOT NULL, created_at INTEGER NOT NULL);

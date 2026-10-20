@@ -1,0 +1,34 @@
+{% extends "app.html" %}
+{% block title %}{{ project.name }}{% endblock %}
+{% block content %}
+<h1>{{ project.name }}</h1>
+{% include "settings_nav.html" %}
+{% if me.is_admin() %}
+<form method="post" action="/settings/projects/{{ project.slug }}" class="stack">
+  <label>Name <input name="name" value="{{ project.name }}" required></label>
+  <label>Platform <select name="platform">{% let current = project.platform.as_str() %}{% include "platforms.html" %}</select></label>
+  <label>Retention (days) <input name="retention_days" type="number" min="1" max="3650" value="{{ project.retention_days }}"></label>
+  <label class="check"><input type="checkbox" name="store_ip" value="1"{% if project.store_ip %} checked{% endif %}> Store client IP addresses</label>
+  <button>Save</button>
+</form>
+{% endif %}
+<h2>DSN keys</h2>
+<table>
+<thead><tr><th>Label</th><th>DSN</th><th></th></tr></thead>
+<tbody>
+{% for k in keys %}
+<tr{% if !k.active %} class="muted"{% endif %}>
+  <td>{{ k.label }}</td><td><code>{{ k.dsn }}</code></td>
+  <td>{% if k.active %}{% if me.is_admin() %}<form method="post" action="/settings/projects/{{ project.slug }}/keys/{{ k.id }}/revoke" class="inline"><button class="secondary">Revoke</button></form>{% endif %}{% else %}revoked{% endif %}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% if me.is_admin() %}
+<form method="post" action="/settings/projects/{{ project.slug }}/keys" class="inline">
+  <input name="label" placeholder="Label" required> <button class="secondary">New key</button>
+</form>
+{% endif %}
+<h2>SDK setup</h2>
+{% include "snippets.html" %}
+{% endblock %}

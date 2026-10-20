@@ -1,0 +1,18 @@
+{% extends "app.html" %}
+{% block title %}Projects{% endblock %}
+{% block content %}
+<h1>Projects</h1>
+{% include "settings_nav.html" %}
+<ul class="rows">
+{% for p in projects %}<li><a href="/settings/projects/{{ p.slug }}">{{ p.name }}</a> <span class="muted">{{ p.platform }}</span></li>{% endfor %}
+</ul>
+{% if me.is_admin() %}
+<h2>New project</h2>
+{% if let Some(e) = error %}<p class="error">{{ e }}</p>{% endif %}
+<form method="post" action="/settings/projects" class="stack">
+  <label>Name <input name="name" required></label>
+  <label>Platform <select name="platform">{% let current = "" %}{% include "platforms.html" %}</select></label>
+  <button>Create project</button>
+</form>
+{% endif %}
+{% endblock %}

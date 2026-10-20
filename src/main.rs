@@ -21,14 +21,27 @@ async fn main() {
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
+    if std::env::var("OPENFAULT_SMTP_URL").is_ok() && std::env::var("OPENFAULT_BASE_URL").is_err() {
+        eprintln!(
+            "OPENFAULT_BASE_URL is required when OPENFAULT_SMTP_URL is set (links in emails must not come from the Host header)"
+        );
+        std::process::exit(1);
+    }
     let data = PathBuf::from(std::env::var("OPENFAULT_DATA").unwrap_or_else(|_| "./data".into()));
     let port: u16 = std::env::var("OPENFAULT_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(8080);
     std::fs::create_dir_all(&data).expect("create OPENFAULT_DATA");
-    let db = Db::open(&data.join("openfault.db")).expect("open database");
-    if let Ok(key) = std::env::var("OPENFAULT_DEV_DSN_KEY") {
+    let path = data.join("openfault.db");
+    let db = Db::open(&path).unwrap_or_else(|e| {
+        eprintln!("cannot open database {}: {e}", path.display());
+        std::process::exit(1);
+    });
+    // ponytail: dev-only seed (project "dev" with a fixed DSN key); release builds use the /setup wizard.
+    if cfg!(debug_assertions)
+        && let Ok(key) = std::env::var("OPENFAULT_DEV_DSN_KEY")
+    {
         db.write(move |c| openfault::db::seed_dev(c, &key))
             .await
             .expect("seed dev project");
@@ -40,8 +53,11 @@ async fn main() {
         .await
         .expect("bind");
     tracing::info!("listening on :{port}");
-    axum::serve(listener, app(state))
-        .with_graceful_shutdown(shutdown())
-        .await
-        .expect("serve");
+    axum::serve(
+        listener,
+        app(state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown())
+    .await
+    .expect("serve");
 }

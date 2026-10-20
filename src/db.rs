@@ -50,6 +50,12 @@ impl Db {
         // auto_vacuum must be set before the first table exists; no-op afterwards.
         w.execute_batch("PRAGMA auto_vacuum=INCREMENTAL;")?;
         pragmas(&w, 16000)?;
+        let check: String = w.query_row("PRAGMA quick_check", [], |r| r.get(0))?;
+        if check != "ok" {
+            return Err(DbError(format!(
+                "integrity check failed ({check}); restore from backup"
+            )));
+        }
         w.execute_batch(include_str!("schema.sql"))?;
         let readers = (0..READERS)
             .map(|_| open_reader(path))

@@ -1,0 +1,6 @@
+<nav class="tabs">
+  {% if me.is_admin() %}<a href="/settings">Organization</a><a href="/settings/members">Members</a>{% endif %}
+  <a href="/settings/projects">Projects</a>
+  <a href="/settings/tokens">API tokens</a>
+  <a href="/settings/account">Account</a>
+</nav>

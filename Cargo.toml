@@ -7,7 +7,7 @@ license = "MIT"
 [dependencies]
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "time"] }
-tower-http = { version = "0.6", features = ["decompression-gzip", "decompression-br", "decompression-deflate", "decompression-zstd", "limit", "trace"] }
+tower-http = { version = "0.6", features = ["decompression-gzip", "decompression-br", "decompression-deflate", "decompression-zstd", "limit", "trace", "compression-gzip"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -19,6 +19,17 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 zstd = "0.13"
 mimalloc = "0.1"
+askama = "0.16"
+rust-embed = "8"
+argon2 = "0.6"
+getrandom = "0.4"
+base64 = "0.22"
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1", "tokio1-rustls", "builder", "hostname", "ring", "webpki-roots"] }
+
+symbolic-sourcemapcache = "13.9"
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+sha1 = "0.10"
+multer = "3"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

@@ -254,6 +254,19 @@ Each milestone ends with a verify step before the next starts.
 
 M1 is where the first commit of real code lands, as asked: ingest path with a real SDK event test.
 
+## 13b. Quality bar (standing, 2026-10-20)
+
+Companies will depend on this. Reliability is the product.
+
+- Every feature ships with a passing test. Red tests never get committed. CI gates the image on `cargo test`, clippy and fmt.
+- Every milestone diff gets an independent code review (correctness, security, data loss) before push; findings are fixed first.
+- Crash safety is tested: SIGKILL mid-ingest, restart, zero accepted events lost (inbox is the WAL).
+- Property tests on the trust boundary: envelope parser and scrubber under random and hostile input.
+- Load check per milestone: 10k-event burst stays under 100 MB and drains cleanly.
+- `PRAGMA quick_check` on boot; refuse to start on a corrupt DB with a clear message. Backup/restore documented.
+- No silent failures: dropped events, failed emails, failed pushes are counted and shown in Settings.
+- Untrusted content is escaped in templates (askama autoescape), fenced in API/MCP output, never logged raw.
+
 ## 14. Out of scope (v1)
 
 Session replay, tracing, profiling, metrics, cron monitoring, multi-tenant SaaS, SSO, teams-as-groups, Postgres, attachments, minidumps, CSP reports, OAuth for MCP, Android.

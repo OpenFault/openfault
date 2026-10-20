@@ -1,0 +1,15 @@
+{% extends "auth.html" %}
+{% block title %}Reset password{% endblock %}
+{% block content %}
+<h1>Reset password</h1>
+{% if sent %}
+  {% if smtp %}<p>If that email has an account, a reset link is on its way.</p>
+  {% else %}<p class="muted">SMTP not configured. The reset link was written to the server log; ask your admin for it.</p>{% endif %}
+{% else %}
+<form method="post" action="/forgot" class="stack">
+  <label>Email <input name="email" type="email" required autofocus></label>
+  <button>Send reset link</button>
+</form>
+{% endif %}
+<p><a href="/login">Back to sign in</a></p>
+{% endblock %}

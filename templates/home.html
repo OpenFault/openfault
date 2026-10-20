@@ -1,0 +1,9 @@
+{% extends "app.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+{% if projects.is_empty() %}<p class="muted">You are not a member of any project yet.</p>{% endif %}
+<ul class="rows">
+{% for p in projects %}<li><a href="/settings/projects/{{ p.slug }}">{{ p.name }}</a> <span class="muted">{{ p.platform }}</span></li>{% endfor %}
+</ul>
+{% endblock %}

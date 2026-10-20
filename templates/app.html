@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block body %}
+<header class="top">
+  <a class="wordmark" href="/">OpenFault</a>
+  <span class="switcher muted">All projects</span>
+  <details class="menu">
+    <summary>{% if me.name.is_empty() %}{{ me.email }}{% else %}{{ me.name }}{% endif %}</summary>
+    <div class="menu-pop">
+      <a href="/settings/account">Account</a>
+      <a href="/settings/tokens">API tokens</a>
+      <form method="post" action="/logout"><button class="link">Sign out</button></form>
+    </div>
+  </details>
+</header>
+<div class="shell">
+  <nav class="side">
+    <a href="/">Dashboard</a>
+    <a href="/issues">Issues</a>
+    <a href="/releases">Releases</a>
+    <a href="/settings{% if !me.is_admin() %}/projects{% endif %}">Settings</a>
+  </nav>
+  <main class="content">{% block content %}{% endblock %}</main>
+</div>
+{% endblock %}

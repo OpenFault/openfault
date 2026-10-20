@@ -1,0 +1,23 @@
+<h3>Rails</h3>
+<pre><code># Gemfile
+gem "sentry-ruby"
+gem "sentry-rails"
+
+# config/initializers/sentry.rb
+Sentry.init do |config|
+  config.dsn = "{{ dsn }}"
+end</code></pre>
+<h3>Next.js</h3>
+<pre><code># npm i @sentry/nextjs
+// instrumentation-client.ts, sentry.server.config.ts, sentry.edge.config.ts
+import * as Sentry from "@sentry/nextjs";
+Sentry.init({ dsn: "{{ dsn }}" });</code></pre>
+<h3>Node</h3>
+<pre><code># npm i @sentry/node
+// instrument.js — require it before anything else
+const Sentry = require("@sentry/node");
+Sentry.init({ dsn: "{{ dsn }}" });</code></pre>
+<h3>Python</h3>
+<pre><code># pip install sentry-sdk
+import sentry_sdk
+sentry_sdk.init(dsn="{{ dsn }}")</code></pre>

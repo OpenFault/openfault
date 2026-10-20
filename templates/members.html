@@ -1,0 +1,35 @@
+{% extends "app.html" %}
+{% block title %}Members{% endblock %}
+{% block content %}
+<h1>Members</h1>
+{% include "settings_nav.html" %}
+<table>
+<thead><tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr></thead>
+<tbody>
+{% for m in users %}
+<tr>
+  <td>{{ m.name }}</td><td>{{ m.email }}</td>
+  <td>{% if m.role == "owner" %}owner{% else %}
+    <form method="post" action="/settings/members/{{ m.id }}/role" class="inline">
+      <select name="role">{% for r in ["admin", "member"] %}<option{% if *r == m.role.as_str() %} selected{% endif %}>{{ r }}</option>{% endfor %}</select>
+      <button class="secondary">Change</button>
+    </form>{% endif %}</td>
+  <td>{% if m.role != "owner" %}<form method="post" action="/settings/members/{{ m.id }}/remove" class="inline"><button class="secondary">Remove</button></form>{% endif %}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+<h2>Invite</h2>
+{% if let Some(link) = invite_link %}
+<p>{% if smtp %}Invite sent. You can also share this link:{% else %}SMTP not configured, copy this link:{% endif %}</p>
+<pre><code>{{ link }}</code></pre>
+{% endif %}
+<form method="post" action="/settings/members/invite" class="stack">
+  <label>Email <input name="email" type="email" required></label>
+  <label>Role <select name="role"><option>member</option><option>admin</option></select></label>
+  <fieldset><legend>Projects (members only see these)</legend>
+  {% for p in projects %}<label class="check"><input type="checkbox" name="p" value="{{ p.id }}"> {{ p.name }}</label>{% endfor %}
+  </fieldset>
+  <button>Create invite</button>
+</form>
+{% endblock %}

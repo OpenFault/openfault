@@ -1,0 +1,1 @@
+{% for p in ["ruby", "javascript", "node", "python", "other"] %}<option value="{{ p }}"{% if *p == current %} selected{% endif %}>{{ p }}</option>{% endfor %}
