@@ -397,3 +397,68 @@ async fn resolved_next_release_materializes() {
         2
     );
 }
+
+/// Replays every real SDK capture with the exact headers it was sent with
+/// (key swapped for the test key), so header quirks like sentry-ruby's empty
+/// `Content-Encoding` can't regress.
+#[tokio::test(flavor = "multi_thread")]
+async fn real_sdk_headers_replay() {
+    let (app, db, _dir) = setup().await;
+    let dir = format!("{}/tests/fixtures/real", env!("CARGO_MANIFEST_DIR"));
+    let mut n = 0;
+    for e in std::fs::read_dir(&dir).unwrap() {
+        let p = e.unwrap().path();
+        let Some(name) = p
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .strip_suffix(".headers.json")
+        else {
+            continue;
+        };
+        let meta: Value = serde_json::from_slice(&std::fs::read(&p).unwrap()).unwrap();
+        let k = |s: &str| s.replace("abcdef0123456789abcdef0123456789", KEY);
+        let hs: Vec<(String, String)> = ["content-type", "content-encoding", "x-sentry-auth"]
+            .iter()
+            .filter_map(|h| meta[h].as_str().map(|v| (h.to_string(), k(v))))
+            .collect();
+        let hs: Vec<(&str, &str)> = hs.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+        let body = fixture(&format!("real/{name}.envelope"));
+        let (s, _, j) = post(&app, &k(meta["path"].as_str().unwrap()), body, &hs).await;
+        assert_eq!(s, StatusCode::OK, "{name}: {j}");
+        n += 1;
+    }
+    assert!(n >= 7, "only {n} header captures found");
+    wait_processed(&db).await;
+    assert!(count(&db, "SELECT count(*) FROM events").await >= n);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn empty_and_identity_content_encoding_accepted() {
+    let (app, db, _dir) = setup().await;
+    let auth =
+        format!("Sentry sentry_version=7, sentry_client=sentry-ruby/5.28.1, sentry_key={KEY}");
+    let body = fixture("real/ruby_exception.envelope");
+    for enc in ["", "identity"] {
+        let (s, _, j) = post(
+            &app,
+            "/api/1/envelope/",
+            body.clone(),
+            &[("content-encoding", enc), ("x-sentry-auth", &auth)],
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{enc:?}: {j}");
+    }
+    wait_processed(&db).await;
+    assert!(count(&db, "SELECT count(*) FROM events").await >= 1);
+    let (s, _, j) = post(
+        &app,
+        "/api/1/envelope/",
+        body,
+        &[("content-encoding", "lzma"), ("x-sentry-auth", &auth)],
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    assert_eq!(j["detail"], "unsupported content-encoding");
+}

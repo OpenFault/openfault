@@ -73,9 +73,39 @@ pub fn app(state: AppState) -> Router {
         .layer(DefaultBodyLimit::disable())
         .layer(RequestBodyLimitLayer::new(100 * MIB)) // decompressed
         .layer(RequestDecompressionLayer::new())
+        .layer(axum::middleware::from_fn(content_encoding))
         .layer(RequestBodyLimitLayer::new(20 * MIB)) // compressed, on the wire
         .layer(TraceLayer::new_for_http())
         .with_state(state)
+}
+
+/// sentry-ruby sends `Content-Encoding: ""` for small envelopes; tower's decompression would 415 it.
+/// Strip empty/identity, and answer unknown encodings with a JSON 415 instead of tower's empty body.
+async fn content_encoding(
+    mut req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::{
+        http::{StatusCode, header::CONTENT_ENCODING},
+        response::IntoResponse,
+    };
+    if let Some(v) = req.headers().get(CONTENT_ENCODING) {
+        let v = v.to_str().unwrap_or("?").trim().to_ascii_lowercase();
+        match v.as_str() {
+            "" | "identity" => {
+                req.headers_mut().remove(CONTENT_ENCODING);
+            }
+            "gzip" | "deflate" | "br" | "zstd" => {}
+            _ => {
+                return (
+                    StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                    axum::Json(serde_json::json!({"detail": "unsupported content-encoding"})),
+                )
+                    .into_response();
+            }
+        }
+    }
+    next.run(req).await
 }
 
 /// Binds `OPENFAULT_BIND` (default `::`, dual-stack so both 127.0.0.1 and ::1 work) on `port`.
