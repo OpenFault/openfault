@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block body %}
-<div id="app" hx-ext="sse" sse-connect="/live?scope={% block live %}{% if let Some(p) = me.scope %}project:{{ p.id }}{% else %}all{% endif %}{% endblock %}">
+<div id="app" hx-ext="sse" sse-connect="/live?scope=all">
 <input type="checkbox" id="nav-t" hidden><input type="checkbox" id="s-t" hidden>
 <div class="shell">
   <nav class="side" aria-label="Main">

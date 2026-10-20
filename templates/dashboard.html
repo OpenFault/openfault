@@ -33,12 +33,12 @@
 <h2>Top issues by users affected</h2>
 {% if top.is_empty() %}<div class="empty">{{ crate::ui::icon("check-circle")|safe }}<p>No issues seen in the {{ label }}. Quiet is good.</p></div>{% else %}
 <div class="tbl"><table class="rt">
-<thead><tr><th>Issue</th><th>Project</th><th class="num">Users</th><th class="num">Events</th><th class="num">Last seen</th></tr></thead>
+<thead><tr><th>Issue</th><th>Project</th><th class="num">Users</th><th class="num">Events</th><th class="num nw">Last seen</th></tr></thead>
 <tbody>{% for r in top %}<tr>
   <td><a class="it" href="/issues/{{ r.id }}"><span class="dot {{ r.level }}"></span><b>{{ r.title }}</b></a></td>
   <td><span class="pill">{{ r.project_slug }}</span></td>
   <td class="num">{{ crate::ui::n(r.user_count) }}</td><td class="num">{{ crate::ui::n(r.event_count) }}</td>
-  <td class="num muted">{{ crate::ui::t(r.last_seen)|safe }}</td>
+  <td class="num nw muted">{{ crate::ui::t(r.last_seen)|safe }}</td>
 </tr>{% endfor %}</tbody>
 </table></div>{% endif %}
 {% endif %}

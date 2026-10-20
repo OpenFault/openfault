@@ -280,3 +280,4 @@ dialog[open]{animation:pop .14s var(--ease);transform-origin:center}
 .card .tbl,.card .list{border:0}
 .snav{display:flex;width:max-content;max-width:100%;overflow-x:auto;scrollbar-width:none;margin-bottom:24px}.snav::-webkit-scrollbar{display:none}.snav a{white-space:nowrap}
 .pair{display:grid;justify-items:start;gap:12px}.pair h2{margin:0}.pair-qr{padding:16px;border-radius:var(--r-card);background:var(--card);color:var(--fg)}.pair-qr .qr{width:200px;height:200px}.pair .copy{margin:0}.pair .copy code{font:600 28px/1 var(--mono);letter-spacing:.12em}
+.seen,.nw{white-space:nowrap}.nw{min-width:96px}
