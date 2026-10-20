@@ -39,17 +39,25 @@ pub fn parse(buf: &[u8]) -> Result<Envelope<'_>, String> {
         let header = json(ih)?;
         let payload = match header.get("length").and_then(Value::as_u64) {
             Some(len) => {
-                let end = pos
-                    .checked_add(len as usize)
-                    .filter(|&e| e <= buf.len())
-                    .ok_or("item length out of bounds")?;
-                let p = &buf[pos..end];
-                pos = if buf.get(end) == Some(&b'\n') {
-                    end + 1
-                } else {
-                    end
+                let n = items.len() + 1;
+                let rem = buf.len() - pos;
+                let len = usize::try_from(len).unwrap_or(usize::MAX);
+                if len > rem {
+                    return Err(format!(
+                        "item {n}: declared length {len} exceeds remaining {rem} bytes"
+                    ));
+                }
+                let end = pos + len;
+                pos = match buf.get(end) {
+                    Some(b'\n') => end + 1,
+                    None => end,
+                    _ => {
+                        return Err(format!(
+                            "item {n}: expected newline after {len}-byte payload"
+                        ));
+                    }
                 };
-                p
+                &buf[end - len..end]
             }
             None => {
                 let (p, next) = line(buf, pos);
@@ -103,6 +111,14 @@ mod tests {
 
     #[test]
     fn bad_length() {
-        assert!(parse(b"{}\n{\"type\":\"event\",\"length\":99}\n{}").is_err());
+        let e = |b: &[u8]| parse(b).err().unwrap();
+        assert_eq!(
+            e(b"{}\n{\"type\":\"event\",\"length\":99}\n{}"),
+            "item 1: declared length 99 exceeds remaining 2 bytes"
+        );
+        assert_eq!(
+            e(b"{}\n{\"type\":\"event\",\"length\":1}\n{}\n"),
+            "item 1: expected newline after 1-byte payload"
+        );
     }
 }
