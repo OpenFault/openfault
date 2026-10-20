@@ -108,7 +108,7 @@ Endpoints: `POST /v1/push` (`{tokens, title, body, url, collapse_id}` → per-to
 
 ## iOS app pairing
 
-Coming in M7.
+In the web UI, open **Settings → Devices → Pair a phone** and scan the QR code with the OpenFault iOS app (or type the 8-character code and host). The phone gets its own write token; remove it from the same page to revoke that token. Codes expire after 10 minutes and work once.
 
 ## Deploy
 

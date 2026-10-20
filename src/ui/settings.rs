@@ -12,6 +12,7 @@ use axum::{
     http::HeaderMap,
     routing::{get, post},
 };
+use rusqlite::{OptionalExtension, params};
 use serde::Deserialize;
 
 pub fn routes() -> Router<AppState> {
@@ -21,6 +22,11 @@ pub fn routes() -> Router<AppState> {
             "/settings/notifications",
             get(notifications).post(save_notifications),
         )
+        .route("/settings/devices", get(devices))
+        .route("/settings/devices/pair", post(pair))
+        .route("/settings/devices/pair/{code}/status", get(pair_status))
+        .route("/settings/devices/pair/{code}/cancel", post(pair_cancel))
+        .route("/settings/devices/{id}/delete", post(delete_device))
         .route(
             "/settings/projects/{slug}/webhooks",
             get(webhooks).post(create_webhook),
@@ -244,4 +250,159 @@ async fn webhook_action(
             "Webhook updated"
         },
     )
+}
+
+// ---------- devices (iOS pairing) ----------
+
+pub struct DeviceRow {
+    pub id: i64,
+    pub platform: String,
+    pub name: String,
+    pub created_at: i64,
+}
+
+pub struct Pair {
+    pub code: String,
+    pub host: String,
+    pub qr: String,
+}
+
+/// The swappable region: the pairing card (polling while pending) + the device list.
+#[derive(Template)]
+#[template(path = "devices_region.html")]
+struct DevicesRegion {
+    pair: Option<Pair>,
+    notice: Option<String>,
+    devices: Vec<DeviceRow>,
+}
+
+#[derive(Template)]
+#[template(path = "devices.html")]
+struct Devices {
+    me: Me,
+    pair: Option<Pair>,
+    notice: Option<String>,
+    devices: Vec<DeviceRow>,
+}
+
+async fn device_rows(st: &AppState, uid: i64) -> Result<Vec<DeviceRow>, super::E> {
+    Ok(st
+        .db
+        .read(move |c| {
+            c.prepare("SELECT id, platform, coalesce(name, platform), created_at FROM devices WHERE user_id = ?1 ORDER BY id")?
+                .query_map([uid], |r| {
+                    Ok(DeviceRow {
+                        id: r.get(0)?,
+                        platform: r.get(1)?,
+                        name: r.get(2)?,
+                        created_at: r.get(3)?,
+                    })
+                })?
+                .collect()
+        })
+        .await?)
+}
+
+fn pair_for(code: String, h: &HeaderMap) -> Pair {
+    let host = base_url(h);
+    let qr = super::tv::qr(&format!(
+        "openfault://pair?host={}&code={code}",
+        super::enc(&host)
+    ));
+    Pair { code, host, qr }
+}
+
+async fn devices(me: Me, State(st): State<AppState>) -> R {
+    let devices = device_rows(&st, me.id).await?;
+    render(Devices {
+        me,
+        pair: None,
+        notice: None,
+        devices,
+    })
+}
+
+async fn pair(me: Me, State(st): State<AppState>, h: HeaderMap) -> R {
+    let p = crate::pairing::start_pairing(&st.db, me.id, &base_url(&h))
+        .await
+        .map_err(|crate::api::ApiErr(s, m)| super::E(s, m))?;
+    let devices = device_rows(&st, me.id).await?;
+    render(Devices {
+        me,
+        pair: Some(pair_for(p.code, &h)),
+        notice: None,
+        devices,
+    })
+}
+
+/// Pending → same card (keeps polling); claimed → "Paired: name" + fresh list; gone → expired.
+async fn pair_status(
+    me: CurrentUser,
+    State(st): State<AppState>,
+    Path(code): Path<String>,
+    h: HeaderMap,
+) -> R {
+    let (hash, uid) = (crate::auth::hash_token(&code), me.id);
+    let row: Option<(Option<i64>, Option<String>)> = st
+        .db
+        .read(move |c| {
+            c.query_row(
+                "SELECT p.claimed_at, d.name FROM pairings p LEFT JOIN devices d ON d.token_id = p.token_id
+                 WHERE p.code_hash = ?1 AND p.user_id = ?2 AND (p.claimed_at IS NOT NULL OR p.expires_at > ?3)",
+                params![hash, uid, crate::db::now()],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+        })
+        .await?;
+    let (pair, notice) = match row {
+        Some((None, _)) => (Some(pair_for(code, &h)), None),
+        Some((Some(_), name)) => (None, Some(format!("Paired: {}", name.unwrap_or_default()))),
+        None => (None, Some("Pairing code expired".into())),
+    };
+    render(DevicesRegion {
+        pair,
+        notice,
+        devices: device_rows(&st, uid).await?,
+    })
+}
+
+async fn pair_cancel(me: CurrentUser, State(st): State<AppState>, Path(code): Path<String>) -> R {
+    let (hash, uid) = (crate::auth::hash_token(&code), me.id);
+    st.db
+        .write(move |c| {
+            c.execute(
+                "DELETE FROM pairings WHERE code_hash = ?1 AND user_id = ?2 AND claimed_at IS NULL",
+                params![hash, uid],
+            )
+        })
+        .await?;
+    flash("/settings/devices", "Pairing cancelled")
+}
+
+/// ponytail: same SQL as api::del_device (a paired phone's token goes with it); that one is a Scope handler.
+async fn delete_device(me: CurrentUser, State(st): State<AppState>, Path(id): Path<i64>) -> R {
+    let uid = me.id;
+    let found = st
+        .db
+        .write(move |c| {
+            let tx = c.transaction()?;
+            let tid: Option<Option<i64>> = tx
+                .query_row(
+                    "DELETE FROM devices WHERE id = ?1 AND user_id = ?2 RETURNING token_id",
+                    params![id, uid],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if let Some(Some(t)) = tid {
+                tx.execute("DELETE FROM api_tokens WHERE id = ?1", [t])?;
+            }
+            tx.commit()?;
+            Ok(tid.is_some())
+        })
+        .await?;
+    if !found {
+        return Err(not_found());
+    }
+    flash("/settings/devices", "Device removed")
 }

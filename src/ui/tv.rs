@@ -69,7 +69,7 @@ fn trend(b: &[i64]) -> Option<(bool, String)> {
 }
 
 /// A QR for phones; the one place the `qrcode` crate is used.
-fn qr(url: &str) -> String {
+pub(super) fn qr(url: &str) -> String {
     qrcode::QrCode::new(url.as_bytes())
         .map(|c| {
             let s = c

@@ -1,0 +1,24 @@
+<div id="devs"{% if let Some(p) = pair %} hx-get="/settings/devices/pair/{{ p.code }}/status" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+{% if let Some(p) = pair %}
+<section class="card sec pair">
+<h2>Pair a phone</h2>
+<div class="pair-qr">{{ p.qr|safe }}</div>
+<p class="muted">Scan with the OpenFault app, or enter this code.</p>
+{% let copy_text = p.code %}{% include "copy.html" %}
+<p class="muted">Host <code>{{ p.host }}</code> · expires in 10 minutes</p>
+<form method="post" action="/settings/devices/pair/{{ p.code }}/cancel" class="inline"><button class="secondary sm">Cancel</button></form>
+</section>
+{% endif %}
+{% if let Some(n) = notice %}<p class="notice">{{ n }}</p>{% endif %}
+{% if devices.is_empty() %}<div class="empty">{{ crate::ui::icon("device-mobile")|safe }}<p>No devices yet. Pair a phone to get push alerts and triage on the go.</p></div>{% else %}
+<div class="tbl"><table class="rt">
+<thead><tr><th>Device</th><th>Platform</th><th>Added</th><th></th></tr></thead>
+<tbody>
+{% for d in devices %}
+<tr><td>{{ crate::ui::icon("device-mobile")|safe }} <b>{{ d.name }}</b></td><td><span class="pill">{{ d.platform }}</span></td><td class="muted">{{ crate::ui::t(d.created_at)|safe }}</td>
+<td class="num"><form method="post" action="/settings/devices/{{ d.id }}/delete" class="inline"><button class="ghost sm danger">Remove</button></form></td></tr>
+{% endfor %}
+</tbody>
+</table></div>{% endif %}
+{% if pair.is_none() %}<form method="post" action="/settings/devices/pair"><button>{{ crate::ui::icon("plus")|safe }}Pair a phone</button></form>{% endif %}
+</div>

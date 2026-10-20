@@ -651,3 +651,86 @@ async fn luma_select_and_checkbox() {
         .body;
     assert!(b.contains("<select name=\"role\">") && b.contains("type=\"checkbox\" name=\"p\""));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn settings_devices_pairing_flow() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Db::open(&dir.path().join("t.db")).unwrap();
+    let st = AppState::new(db.clone());
+    let app = app(st.clone());
+    let c = req(&app, "POST", "/setup", "", "org_name=Acme&name=Ann+Admin&email=ann@acme.io&password=ann+password1&project_name=Web+App&platform=javascript", FORM).await.cookie.unwrap();
+
+    let r = req(&app, "GET", "/settings/devices", &c, "", FORM).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(
+        r.body.contains("href=\"/settings/devices\" class=\"on\"")
+            && r.body.contains("Pair a phone")
+    );
+
+    let r = req(&app, "POST", "/settings/devices/pair", &c, "", FORM).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    let i = r.body.find("/settings/devices/pair/").unwrap() + "/settings/devices/pair/".len();
+    let code = r.body[i..i + 8].to_string();
+    assert!(
+        r.body.contains("<svg class=\"qr\"") && r.body.contains(&format!("<code>{code}</code>"))
+    );
+    let status = format!("/settings/devices/pair/{code}/status");
+    assert!(r.body.contains(&format!("hx-get=\"{status}\"")));
+
+    let r = req(&app, "GET", &status, &c, "", FORM).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(r.body.starts_with("<div id=\"devs\" hx-get") && r.body.contains("<svg class=\"qr\""));
+
+    let claimed = openfault::pairing::claim(&st, &code, "ios", "Ann's iPhone", None)
+        .await
+        .ok()
+        .unwrap();
+    let r = req(&app, "GET", &status, &c, "", FORM).await;
+    assert!(
+        !r.body.contains("hx-get") && r.body.contains("Paired: Ann&#39;s iPhone"),
+        "{}",
+        r.body
+    );
+    assert!(
+        r.body
+            .contains(&format!("/settings/devices/{}/delete", claimed.device_id))
+    );
+
+    let api = |tok: String| {
+        let app = app.clone();
+        async move {
+            let r = Request::builder()
+                .uri("/api/v1/projects")
+                .header(header::AUTHORIZATION, format!("Bearer {tok}"))
+                .body(Body::empty())
+                .unwrap();
+            app.oneshot(r).await.unwrap().status()
+        }
+    };
+    assert_eq!(api(claimed.token.clone()).await, StatusCode::OK);
+    let r = req(
+        &app,
+        "POST",
+        &format!("/settings/devices/{}/delete", claimed.device_id),
+        &c,
+        "",
+        FORM,
+    )
+    .await;
+    assert_eq!(r.location, "/settings/devices");
+    assert_eq!(api(claimed.token).await, StatusCode::UNAUTHORIZED);
+    let r = req(&app, "GET", "/settings/devices", &c, "", FORM).await;
+    assert!(!r.body.contains("Ann&#39;s iPhone"));
+
+    // members get the page too
+    let h = openfault::auth::hash_token("s9");
+    db.write(move |c| {
+        c.execute("INSERT INTO users (id, email, name, pw_hash, role, created_at) VALUES (9, 'm@x.io', 'Max', 'x', 'member', 0)", [])?;
+        c.execute("INSERT INTO sessions (id_hash, user_id, expires_at) VALUES (?1, 9, 9999999999)", [h])
+    })
+    .await
+    .unwrap();
+    let r = req(&app, "GET", "/settings/devices", "of_session=s9", "", FORM).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(r.body.contains("Devices"));
+}
