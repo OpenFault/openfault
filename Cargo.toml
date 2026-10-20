@@ -37,6 +37,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 # already in the tree via rustls/lettre; used for HMAC + the APNs ES256 JWT.
 ring = "0.17"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+socket2 = "0.6.5"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

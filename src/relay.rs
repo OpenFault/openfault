@@ -230,9 +230,7 @@ pub async fn run() {
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(8080);
-    let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
-        .await
-        .expect("bind");
+    let listener = crate::listen(port);
     tracing::info!(host = a.host, "push relay listening on :{port}");
     axum::serve(listener, router(Arc::new(a)))
         .await

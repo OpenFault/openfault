@@ -53,9 +53,7 @@ async fn main() {
     tokio::spawn(process::run(db.clone(), state.notify.clone()));
     tokio::spawn(openfault::notify::run(db.clone()));
     tokio::spawn(process::housekeeping(db));
-    let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
-        .await
-        .expect("bind");
+    let listener = openfault::listen(port);
     tracing::info!("listening on :{port}");
     axum::serve(
         listener,

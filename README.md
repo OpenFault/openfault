@@ -47,6 +47,7 @@ Tests: `cargo test` (includes a SIGKILL crash-safety test and property tests). T
 |---|---|---|
 | `OPENFAULT_DATA` | `./data` | Directory for the SQLite database and generated secret |
 | `OPENFAULT_PORT` | `8080` | HTTP listen port |
+| `OPENFAULT_BIND` | `::` | Listen address. The default is dual-stack (IPv4 and IPv6); falls back to `0.0.0.0` if IPv6 is unavailable |
 
 ## First-boot wizard
 
