@@ -68,7 +68,41 @@ Coming in M2.
 
 ## Push notifications
 
-Coming in M6.
+OpenFault notifies on four triggers: new issue, regression, unmute (mute expired or volume threshold hit) and spike (an issue's hour is ≥ 20 events and over 10× its 24h hourly median, at most once per 6h). Each user picks email and push per trigger in Settings → Notifications (or `PUT /api/v1/me/notifications`). Every user gets at most one email/push per issue per trigger per hour. Webhooks (Slack, Discord, generic JSON) are set per project. Failed deliveries are retried 3 times and kept for 24h in the project's delivery log.
+
+| Env | Meaning |
+|---|---|
+| `OPENFAULT_BASE_URL` | Public URL used for links in emails, pushes and webhooks. |
+| `OPENFAULT_PUSH_RELAY_URL` | Push relay to send iOS pushes through, e.g. `https://push.openfault.dev`. Push is off unless this and the token are set. |
+| `OPENFAULT_PUSH_RELAY_TOKEN` | Bearer token for that relay. |
+| `OPENFAULT_ALLOW_PRIVATE_WEBHOOKS` | `1` allows webhook URLs on localhost, private or link-local IPs (and plain `http://` to loopback). Off by default. |
+
+Generic webhooks receive `{"kind", "project", "issue": {"id", "title", "level", "url", "events", "users", "first_seen", "last_seen", "release"}}`. If you set a secret, each request carries `X-OpenFault-Signature: sha256=<hex HMAC-SHA256(secret, raw body)>`.
+
+**Hosted relay (App Store app).** The APNs key belongs to whoever ships the iOS build, so your server never holds it. Set `OPENFAULT_PUSH_RELAY_URL=https://push.openfault.dev` and the `OPENFAULT_PUSH_RELAY_TOKEN` you were given. The relay only receives device tokens, the issue title, the project name and the deep link.
+
+**Self-run relay.** The relay is the same image in a second mode:
+
+```sh
+docker run -d -p 8081:8080 \
+  -e APNS_KEY_P8_FILE=/keys/AuthKey_ABC123.p8 -v $PWD/keys:/keys:ro \
+  -e APNS_KEY_ID=ABC123 -e APNS_TEAM_ID=TEAM123456 -e APNS_BUNDLE_ID=com.example.openfault \
+  -e RELAY_TOKEN=$(openssl rand -hex 32) \
+  ghcr.io/openfault/openfault:latest relay
+```
+
+| Env | Meaning |
+|---|---|
+| `APNS_KEY_P8` / `APNS_KEY_P8_FILE` | The `.p8` key as PEM text (literal `\n` allowed) or a path to it. |
+| `APNS_KEY_ID`, `APNS_TEAM_ID` | From your Apple developer account. |
+| `APNS_BUNDLE_ID` | The iOS app's bundle id (APNs topic). |
+| `RELAY_TOKEN` | Servers must send `Authorization: Bearer <RELAY_TOKEN>`. |
+| `APNS_SANDBOX` | `1` sends to the APNs development host (debug builds from Xcode). |
+| `PORT` | Listen port, default 8080. |
+
+Endpoints: `POST /v1/push` (`{tokens, title, body, url, collapse_id}` → per-token `{token, status, reason}`; tokens APNs reports as gone are deleted on your server) and `GET /healthz`. The provider JWT is cached and refreshed every 50 minutes.
+
+**Self-built iOS app.** Pushes only reach a build signed with the same team and bundle id as the relay's key. To stay fully self-sovereign, build the open-source `openfault-ios` app with your own Apple account and bundle id, run the relay with your own key, and point your server at it.
 
 ## iOS app pairing
 
@@ -93,6 +127,10 @@ Coming in M8. Everything lives in the `/data` volume.
 ## Memory and sizing
 
 Coming in M8.
+
+## Design
+
+The web UI follows Karthik's shadcn preset b1VlJj2Q (style Luma, neutral grayscale): Inter for all text, Phosphor icons, and the preset's `:root`/`.dark` tokens, reimplemented in plain CSS (`static/app.css`, no Tailwind or JS framework).
 
 ## AI-assisted development
 

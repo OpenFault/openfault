@@ -1,0 +1,1 @@
+<nav class="seg" aria-label="Project settings" style="margin-bottom:20px"><a href="/settings/projects/{{ project.slug }}"{% if !me.at("webhooks") %} class="on"{% endif %}>General</a><a href="/settings/projects/{{ project.slug }}/webhooks"{% if me.at("webhooks") %} class="on"{% endif %}>{{ crate::ui::icon("link")|safe }}Webhooks</a></nav>

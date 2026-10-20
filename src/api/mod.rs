@@ -11,7 +11,7 @@ use axum::{
     extract::{FromRequestParts, Path, Query, State},
     http::{StatusCode, header, request::Parts},
     response::{IntoResponse, Response},
-    routing::{delete, get, post},
+    routing::{delete, get},
 };
 use rusqlite::{OptionalExtension, params};
 use serde::Deserialize;
@@ -30,8 +30,9 @@ pub fn routes() -> Router<AppState> {
         .route("/stats", get(all_stats))
         .route("/me", get(me))
         .route("/me/notifications", get(get_prefs).put(put_prefs))
-        .route("/me/devices", post(add_device))
-        .route("/me/devices/{id}", delete(del_device))
+        .route("/me/devices", get(list_devices).post(add_device))
+        .route("/me/devices/{id}", delete(del_device).patch(patch_device))
+        .merge(crate::pairing::routes())
 }
 
 pub struct ApiErr(pub StatusCode, pub String);
@@ -484,25 +485,10 @@ async fn me(s: Scope) -> R {
     })))
 }
 
-const KINDS: [&str; 4] = ["new_issue", "regression", "unmuted", "spike"];
-
-#[derive(Deserialize, serde::Serialize)]
-struct Pref {
-    project_id: Option<i64>,
-    kind: String,
-    email: bool,
-    push: bool,
-}
+use crate::notify::{KINDS, Pref};
 
 async fn get_prefs(s: Scope, State(st): State<AppState>) -> R {
-    let uid = s.user.id;
-    let rows: Vec<Pref> = st
-        .db
-        .read(move |c| {
-            c.prepare("SELECT project_id, kind, email, push FROM notif_prefs WHERE user_id = ?1 ORDER BY project_id, kind")?
-                .query_map([uid], |r| Ok(Pref { project_id: r.get(0)?, kind: r.get(1)?, email: r.get(2)?, push: r.get(3)? }))?
-                .collect()
-        })
+    let rows = crate::notify::prefs_for(&st.db, s.user.id)
         .await
         .map_err(internal)?;
     Ok(Json(json!(rows)))
@@ -523,20 +509,8 @@ async fn put_prefs(s: Scope, State(st): State<AppState>, Json(prefs): Json<Vec<P
             return Err(err(StatusCode::FORBIDDEN, "project not in token scope"));
         }
     }
-    let uid = s.user.id;
     let rows = serde_json::to_value(&prefs).map_err(internal)?;
-    st.db
-        .write(move |c| {
-            let tx = c.transaction()?;
-            tx.execute("DELETE FROM notif_prefs WHERE user_id = ?1", [uid])?;
-            for p in &prefs {
-                tx.execute(
-                    "INSERT INTO notif_prefs (user_id, project_id, kind, email, push) VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![uid, p.project_id, p.kind, p.email, p.push],
-                )?;
-            }
-            tx.commit()
-        })
+    crate::notify::set_prefs(&st.db, s.user.id, prefs)
         .await
         .map_err(internal)?;
     Ok(Json(rows))
@@ -576,10 +550,20 @@ async fn del_device(s: Scope, State(st): State<AppState>, Path(id): Path<i64>) -
     let n = st
         .db
         .write(move |c| {
-            c.execute(
-                "DELETE FROM devices WHERE id = ?1 AND user_id = ?2",
-                params![id, uid],
-            )
+            let tx = c.transaction()?;
+            // a paired phone's token goes with its device.
+            let tid: Option<Option<i64>> = tx
+                .query_row(
+                    "DELETE FROM devices WHERE id = ?1 AND user_id = ?2 RETURNING token_id",
+                    params![id, uid],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if let Some(Some(t)) = tid {
+                tx.execute("DELETE FROM api_tokens WHERE id = ?1", [t])?;
+            }
+            tx.commit()?;
+            Ok(tid.is_some() as usize)
         })
         .await
         .map_err(internal)?;
@@ -588,4 +572,66 @@ async fn del_device(s: Scope, State(st): State<AppState>, Path(id): Path<i64>) -
     } else {
         Ok(StatusCode::NO_CONTENT)
     }
+}
+
+async fn list_devices(s: Scope, State(st): State<AppState>) -> R {
+    let (uid, tid) = (s.user.id, s.token.id);
+    let rows = st
+        .db
+        .read(move |c| {
+            c.prepare("SELECT id, platform, name, created_at, token_id = ?2 FROM devices WHERE user_id = ?1 ORDER BY id")?
+                .query_map(params![uid, tid], |r| {
+                    Ok(json!({"id": r.get::<_, i64>(0)?, "platform": r.get::<_, String>(1)?,
+                        "name": r.get::<_, Option<String>>(2)?, "created_at": r.get::<_, i64>(3)?,
+                        "current": r.get::<_, Option<bool>>(4)?.unwrap_or(false)}))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .await
+        .map_err(internal)?;
+    Ok(Json(json!(rows)))
+}
+
+#[derive(Deserialize)]
+struct DevicePatch {
+    push_token: Option<String>,
+    name: Option<String>,
+}
+
+/// Rotates the APNs token and/or renames the device.
+async fn patch_device(
+    s: Scope,
+    State(st): State<AppState>,
+    Path(id): Path<i64>,
+    Json(d): Json<DevicePatch>,
+) -> R {
+    s.writer()?;
+    if d.push_token
+        .as_ref()
+        .is_some_and(|p| p.is_empty() || p.len() > 512)
+        || d.name.as_ref().is_some_and(|n| n.len() > 100)
+    {
+        return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "invalid device"));
+    }
+    let uid = s.user.id;
+    let n = st
+        .db
+        .write(move |c| {
+            c.execute(
+                "UPDATE devices SET push_token = coalesce(?3, push_token), name = coalesce(?4, name) WHERE id = ?1 AND user_id = ?2",
+                params![id, uid, d.push_token, d.name],
+            )
+        })
+        .await
+        .map_err(|e| {
+            if e.0.contains("UNIQUE") {
+                err(StatusCode::CONFLICT, "push_token already registered on another device")
+            } else {
+                internal(e)
+            }
+        })?;
+    if n == 0 {
+        return Err(err(StatusCode::NOT_FOUND, "device not found"));
+    }
+    Ok(Json(json!({"id": id})))
 }

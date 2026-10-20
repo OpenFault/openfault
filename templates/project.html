@@ -3,6 +3,7 @@
 {% block content %}
 <div class="head"><h1>{{ project.name }}</h1><a class="btn secondary sm" href="/projects/{{ project.slug }}/issues">View issues {{ crate::ui::icon("arrow-right")|safe }}</a></div>
 {% include "settings_nav.html" %}
+{% if me.is_admin() %}{% include "project_nav.html" %}{% endif %}
 <div class="form-col">
 <section class="card sec">
   <h2>DSN</h2>

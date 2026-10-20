@@ -47,7 +47,7 @@
 <form method="post" action="/issues/bulk" class="issues">
   <input type="hidden" name="next" value="{{ next }}">
   <div class="list" role="list">
-    <div class="row lh"><span></span><span>Issue</span><span>24h</span><span class="num">Events</span><span class="num">Users</span><span>Last · first seen</span><span></span></div>
+    <div class="row lh"><span></span><span>Issue</span><span class="spk">24h</span><span class="num">Events</span><span class="num">Users</span><span>Last · first seen</span><span></span></div>
     <div class="chunk">
     {% for x in rows %}{% let r = x.r %}
     <div class="row{% if r.status != "unresolved" %} off{% endif %}" role="listitem" tabindex="0" data-id="{{ r.id }}" data-k="{{ r.id }}">

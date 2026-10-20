@@ -21,6 +21,9 @@ async fn main() {
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
+    if std::env::args().nth(1).as_deref() == Some("relay") {
+        return openfault::relay::run().await;
+    }
     if std::env::var("OPENFAULT_SMTP_URL").is_ok() && std::env::var("OPENFAULT_BASE_URL").is_err() {
         eprintln!(
             "OPENFAULT_BASE_URL is required when OPENFAULT_SMTP_URL is set (links in emails must not come from the Host header)"
@@ -48,6 +51,7 @@ async fn main() {
     }
     let state = AppState::new(db.clone());
     tokio::spawn(process::run(db.clone(), state.notify.clone()));
+    tokio::spawn(openfault::notify::run(db.clone()));
     tokio::spawn(process::housekeeping(db));
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
         .await

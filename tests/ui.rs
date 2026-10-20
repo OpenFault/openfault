@@ -446,3 +446,170 @@ async fn icons_sprite_and_chart() {
         assert!(!s.contains("NaN") && !s.contains("inf"), "{s}");
     }
 }
+
+#[test]
+fn css_uses_luma_preset() {
+    let css = include_str!("../static/app.css");
+    assert!(css.contains("--radius: 0.625rem"));
+    assert!(!css.contains("Geist"));
+}
+
+async fn admin_app() -> (Router, String, Db, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Db::open(&dir.path().join("t.db")).unwrap();
+    let app = app(AppState::new(db.clone()));
+    let r = req(&app, "POST", "/setup", "", "org_name=Acme&name=Ann+Admin&email=ann@acme.io&password=ann+password1&project_name=Web+App&platform=javascript", FORM).await;
+    (app, r.cookie.unwrap(), db, dir)
+}
+
+const HOOKS: &str = "/settings/projects/web-app/webhooks";
+
+async fn add_hook(app: &Router, c: &str) -> i64 {
+    let r = req(
+        app,
+        "POST",
+        HOOKS,
+        c,
+        "kind=generic&url=https%3A%2F%2Fopenfault.invalid%2Fhook&secret=s3",
+        FORM,
+    )
+    .await;
+    assert_eq!(r.location, HOOKS);
+    let page = req(app, "GET", HOOKS, c, "", FORM).await.body;
+    let i = page.find("/webhooks/").unwrap() + "/webhooks/".len();
+    page[i..].split('/').next().unwrap().parse().unwrap()
+}
+
+#[tokio::test]
+async fn webhooks_list_and_deliveries() {
+    let (app, c, db, _d) = admin_app().await;
+    add_hook(&app, &c).await;
+    db.write(|c| {
+        c.execute(
+            "INSERT INTO notif_queue (project_id, issue_id, kind, payload_json, created_at) VALUES (1, 1, 'new_issue', json_object('title', ?1), strftime('%s','now'))",
+            [XSS1],
+        )
+    })
+    .await
+    .unwrap();
+    let r = req(&app, "GET", HOOKS, &c, "", FORM).await;
+    assert_eq!(r.status, StatusCode::OK);
+    let b = r.body;
+    assert!(b.contains("openfault.invalid/hook") && b.contains("generic") && b.contains("signed"));
+    assert!(b.contains("Deliveries") && b.contains("pending") && b.contains("New issue"));
+    assert!(!b.contains(XSS1), "delivery title must be escaped");
+    assert!(!b.contains("s3"), "secret never rendered");
+}
+
+#[tokio::test]
+async fn webhook_create_shows_validation_inline() {
+    let (app, c, _db, _d) = admin_app().await;
+    let r = req(
+        &app,
+        "POST",
+        HOOKS,
+        &c,
+        "kind=slack&url=http%3A%2F%2Fexample.com%2Fx",
+        FORM,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(
+        r.body.contains("webhook URL must use https") && r.body.contains("http://example.com/x")
+    );
+    let r = req(
+        &app,
+        "POST",
+        HOOKS,
+        &c,
+        "kind=teams&url=https%3A%2F%2Fexample.com%2Fx",
+        FORM,
+    )
+    .await;
+    assert!(r.body.contains("kind must be slack|discord|generic"));
+}
+
+#[tokio::test]
+async fn webhook_toggle_test_delete() {
+    let (app, c, db, _d) = admin_app().await;
+    let id = add_hook(&app, &c).await;
+    let enabled = |db: Db| async move {
+        db.read(move |c| {
+            c.query_row("SELECT enabled FROM webhooks WHERE id = ?1", [id], |r| {
+                r.get::<_, bool>(0)
+            })
+        })
+        .await
+        .unwrap()
+    };
+    let r = req(&app, "POST", &format!("{HOOKS}/{id}/toggle"), &c, "", FORM).await;
+    assert_eq!(r.location, HOOKS);
+    assert!(!enabled(db.clone()).await);
+    req(
+        &app,
+        "POST",
+        &format!("{HOOKS}/{id}/toggle"),
+        &c,
+        "enabled=1",
+        FORM,
+    )
+    .await;
+    assert!(enabled(db.clone()).await);
+    let r = req(&app, "POST", &format!("{HOOKS}/{id}/test"), &c, "", FORM).await;
+    assert_eq!(r.location, HOOKS);
+    assert!(
+        r.cookie.unwrap().starts_with("of_flash="),
+        "test result is flashed"
+    );
+    assert_eq!(
+        req(&app, "POST", &format!("{HOOKS}/999/test"), &c, "", FORM)
+            .await
+            .status,
+        StatusCode::NOT_FOUND
+    );
+    req(&app, "POST", &format!("{HOOKS}/{id}/delete"), &c, "", FORM).await;
+    assert_eq!(
+        req(&app, "POST", &format!("{HOOKS}/{id}/delete"), &c, "", FORM)
+            .await
+            .status,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn org_settings_show_push_relay() {
+    let (app, c, _db, _d) = admin_app().await;
+    let b = req(&app, "GET", "/settings", &c, "", FORM).await.body;
+    assert!(b.contains("Push relay"));
+}
+
+#[tokio::test]
+async fn notifications_use_notify_prefs() {
+    let (app, c, db, _d) = admin_app().await;
+    let r = req(
+        &app,
+        "POST",
+        "/settings/notifications",
+        &c,
+        "e:1:spike=on&p:1:new_issue=on",
+        FORM,
+    )
+    .await;
+    assert_eq!(r.location, "/settings/notifications");
+    let p = openfault::notify::prefs_for(&db, 1).await.unwrap();
+    assert_eq!(p.len(), 4);
+    assert!(p.iter().any(|x| x.kind == "spike" && x.email && !x.push));
+    let b = req(&app, "GET", "/settings/notifications", &c, "", FORM)
+        .await
+        .body;
+    assert_eq!(b.matches(" checked").count(), 2);
+}
+
+#[tokio::test]
+async fn project_subnav_links_webhooks() {
+    let (app, c, _db, _d) = admin_app().await;
+    let b = req(&app, "GET", "/settings/projects/web-app", &c, "", FORM)
+        .await
+        .body;
+    assert!(b.contains("href=\"/settings/projects/web-app/webhooks\""));
+}

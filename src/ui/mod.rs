@@ -130,7 +130,7 @@ pub fn render(t: impl Template) -> R {
     Ok(Html(t.render()?).into_response())
 }
 /// static asset cache-buster; bump when static/ changes.
-pub const V: &str = "0.1.0-m3.4";
+pub const V: &str = "0.1.0-m3.7";
 
 /// A Phosphor icon from the sprite (`static/icons.svg`); render with `|safe`.
 pub fn icon(name: &str) -> String {
@@ -957,6 +957,7 @@ struct Settings {
     org_name: String,
     base_url: String,
     smtp: bool,
+    push: String,
 }
 
 async fn settings(me: Me, State(st): State<AppState>, h: HeaderMap) -> R {
@@ -974,6 +975,7 @@ async fn settings(me: Me, State(st): State<AppState>, h: HeaderMap) -> R {
         org_name,
         base_url: base_url(&h),
         smtp: mail::configured(),
+        push: crate::notify::push::status(),
     })
 }
 

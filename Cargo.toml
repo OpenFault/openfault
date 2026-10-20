@@ -6,7 +6,7 @@ license = "MIT"
 
 [dependencies]
 axum = "0.8"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "time", "net"] }
 tower-http = { version = "0.6", features = ["decompression-gzip", "decompression-br", "decompression-deflate", "decompression-zstd", "limit", "trace", "compression-gzip"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
@@ -33,6 +33,9 @@ symbolic-sourcemapcache = "13.9"
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 sha1 = "0.10"
 multer = "3"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "http2"] }
+# already in the tree via rustls/lettre; used for HMAC + the APNs ES256 JWT.
+ring = "0.17"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 
 [dev-dependencies]

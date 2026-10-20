@@ -5,6 +5,7 @@ pub mod symbolicate;
 
 use crate::db::{Db, now};
 use crate::live::LiveEvent;
+use crate::notify;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde_json::Value;
 use std::sync::Arc;
@@ -369,6 +370,25 @@ fn process_one(
          ON CONFLICT DO UPDATE SET received = received + 1, stored = stored + excluded.stored, dropped = dropped + excluded.dropped",
         params![pid, hour, store as i64, (!store) as i64],
     )?;
+    // same decision points as the live tick above; delivery happens in notify::run.
+    let notif = match kind {
+        "new_issue" | "regression" => Some(kind),
+        "unresolved" => Some("unmuted"),
+        _ => None,
+    };
+    if let Some(k) = notif {
+        notify::enqueue(
+            tx,
+            &notify::Notification::new(pid, issue_id, k, &title, level),
+        )?;
+    }
+    // ponytail: checked every 10th event of the hour (20, 30, …) to keep the median query off the hot path.
+    if hour_count % 10 == 0 && notify::check_spike(tx, issue_id, hour, hour_count, received)? {
+        notify::enqueue(
+            tx,
+            &notify::Notification::new(pid, issue_id, "spike", &title, level),
+        )?;
+    }
     Ok(LiveEvent::new(pid, issue_id, &title, level, kind, received))
 }
 
@@ -390,16 +410,30 @@ pub fn purge(c: &Connection, t: i64) -> rusqlite::Result<()> {
 
 /// Muted issues whose `mute_until` passed, even with no new events. The on-event path in process_one stays.
 pub fn expire_mutes(c: &Connection, t: i64) -> rusqlite::Result<usize> {
+    // one transaction: a crash can't leave rows enqueued but still muted (or the reverse).
+    let c = c.unchecked_transaction()?;
+    let expired: Vec<(i64, i64, String, String)> = c
+        .prepare("SELECT id, project_id, title, level FROM issues WHERE status = 'muted' AND mute_until <= ?1")?
+        .query_map([t], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    for (id, pid, title, level) in &expired {
+        notify::enqueue(
+            &c,
+            &notify::Notification::new(*pid, *id, "unmuted", title, level),
+        )?;
+    }
     c.execute(
         "INSERT INTO issue_activity (issue_id, kind, data_json, created_at)
          SELECT id, 'unmuted_expired', '{}', ?1 FROM issues WHERE status = 'muted' AND mute_until <= ?1",
         [t],
     )?;
-    c.execute(
+    let n = c.execute(
         "UPDATE issues SET status = 'unresolved', mute_until = NULL, mute_after_count = NULL, mute_window_min = NULL
          WHERE status = 'muted' AND mute_until <= ?1",
         [t],
-    )
+    )?;
+    c.commit()?;
+    Ok(n)
 }
 
 /// Every 60s: expire mutes. Hourly: retention deletes in small batches, WAL checkpoint, incremental vacuum.

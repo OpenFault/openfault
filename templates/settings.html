@@ -16,6 +16,7 @@
   <dl class="kv">
     <dt>Base URL</dt><dd>{{ base_url }}<div class="hint">Used in DSNs and email links. Set it with the base URL environment variable when running behind a proxy.</div></dd>
     <dt>Email</dt><dd>{% if smtp %}SMTP configured{% else %}<span class="muted">Not configured</span><div class="hint">Invites and resets show copyable links instead of sending email.</div>{% endif %}</dd>
+    <dt>Push relay</dt><dd>{% if push.starts_with("on") %}{{ push }}{% else %}<span class="muted">{{ push }}</span>{% endif %}<div class="hint">Push to the iOS app goes through the relay set by OPENFAULT_PUSH_RELAY_URL and OPENFAULT_PUSH_RELAY_TOKEN.</div></dd>
   </dl>
 </section>
 </div>

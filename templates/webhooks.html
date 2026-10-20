@@ -1,0 +1,58 @@
+{% extends "app.html" %}
+{% block title %}Webhooks · {{ project.name }}{% endblock %}
+{% block content %}
+<div class="head"><h1>{{ project.name }}</h1></div>
+{% include "settings_nav.html" %}
+{% include "project_nav.html" %}
+<div class="form-col">
+<section class="card sec">
+  <h2>Webhooks</h2>
+  {% if hooks.is_empty() %}<p class="muted">No webhooks yet. Add one below to post new issues, regressions and spikes to Slack, Discord or any JSON endpoint.</p>{% else %}
+  <div class="tbl"><table class="rt">
+  <thead><tr><th>Kind</th><th>URL</th><th>Enabled</th><th>Last OK</th><th>Last error</th><th>Secret</th><th></th></tr></thead>
+  <tbody>
+  {% for h in hooks %}
+  <tr>
+    <td><span class="pill">{{ h.kind }}</span></td>
+    <td><code class="ell" title="{{ h.url }}">{{ h.url }}</code></td>
+    <td><form method="post" action="/settings/projects/{{ project.slug }}/webhooks/{{ h.id }}/toggle" class="inline"><label class="sw" title="Enabled"><input type="checkbox" role="switch" name="enabled" value="1" data-autosubmit aria-label="Enabled"{% if h.enabled %} checked{% endif %}><span></span></label><noscript><button class="ghost sm">Save</button></noscript></form></td>
+    <td class="muted">{% if let Some(t) = h.last_ok_at %}{{ crate::ui::t(t)|safe }}{% else %}never{% endif %}</td>
+    <td>{% if let Some(e) = h.last_error %}<span class="error sm">{{ e }}</span>{% else %}<span class="dim">none</span>{% endif %}</td>
+    <td class="muted">{% if h.has_secret %}signed{% else %}none{% endif %}</td>
+    <td class="num"><form method="post" action="/settings/projects/{{ project.slug }}/webhooks/{{ h.id }}/test" class="inline"><button class="secondary sm">Test</button></form> <form method="post" action="/settings/projects/{{ project.slug }}/webhooks/{{ h.id }}/delete" class="inline"><button class="ghost sm danger" aria-label="Delete webhook">{{ crate::ui::icon("trash")|safe }}</button></form></td>
+  </tr>
+  {% endfor %}
+  </tbody>
+  </table></div>
+  {% endif %}
+  <h3>Add webhook</h3>
+  {% if let Some(e) = error %}<p class="error" role="alert">{{ e }}</p>{% endif %}
+  <form method="post" action="/settings/projects/{{ project.slug }}/webhooks" class="stack">
+    <label>Kind <select name="kind">{% for k in ["slack", "discord", "generic"] %}<option value="{{ k }}"{% if kind == **k %} selected{% endif %}>{{ k }}</option>{% endfor %}</select></label>
+    <label>URL <input name="url" type="url" value="{{ url }}" placeholder="https://hooks.slack.com/services/…" required></label>
+    <label>Secret <input name="secret" type="password" autocomplete="off" placeholder="Optional"><span class="hint">Generic webhooks get an HMAC-SHA256 signature header when set.</span></label>
+    <button>{{ crate::ui::icon("plus")|safe }}Add webhook</button>
+  </form>
+</section>
+<section class="card sec">
+  <h2>Deliveries</h2>
+  {% if deliveries.is_empty() %}<p class="muted">No notifications in the last 24 hours.</p>{% else %}
+  <div class="tbl"><table class="rt">
+  <thead><tr><th>Status</th><th>Kind</th><th>Issue</th><th class="num">Sent</th><th>Last error</th><th>Time</th></tr></thead>
+  <tbody>
+  {% for d in deliveries %}
+  <tr>
+    <td><span class="pill{% if d.status() == "failed" %} error{% endif %}">{{ d.status() }}</span></td>
+    <td class="muted">{{ crate::notify::label(d.kind) }}</td>
+    <td><a href="/issues/{{ d.issue_id }}">{{ d.title }}</a></td>
+    <td class="num">{{ d.sent }}</td>
+    <td>{% if let Some(e) = d.last_error %}<span class="error sm">{{ e }}</span>{% endif %}</td>
+    <td class="muted">{{ crate::ui::t(d.created_at)|safe }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+  </table></div>
+  {% endif %}
+</section>
+</div>
+{% endblock %}

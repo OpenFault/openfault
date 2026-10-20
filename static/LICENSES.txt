@@ -1,7 +1,7 @@
-Geist Sans and Geist Mono (geist npm 1.8.1), variable woff2, unmodified.
-Files: geist.woff2, geist-mono.woff2
+Inter (@fontsource-variable/inter 5.3.0), variable wght woff2, latin subset, unmodified.
+Files: inter.woff2 (inter-latin-wght-normal.woff2)
 
-Copyright (c) 2023 Vercel, in collaboration with basement.studio
+Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter)
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:

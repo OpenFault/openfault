@@ -60,6 +60,7 @@ impl Db {
             )));
         }
         w.execute_batch(include_str!("schema.sql"))?;
+        crate::notify::migrate(&w)?;
         let readers = (0..READERS)
             .map(|_| open_reader(path))
             .collect::<rusqlite::Result<Vec<_>>>()?;
