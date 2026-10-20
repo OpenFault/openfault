@@ -2,50 +2,62 @@
 {% block body %}
 <div id="app" hx-ext="sse" sse-connect="/live?scope={% block live %}{% if let Some(p) = me.scope %}project:{{ p.id }}{% else %}all{% endif %}{% endblock %}">
 <input type="checkbox" id="nav-t" hidden><input type="checkbox" id="s-t" hidden>
-<header class="top">
-  <label for="nav-t" class="menu-btn btn ghost sm icon" aria-label="Menu">{{ crate::ui::icon("list")|safe }}</label>
-  <a class="wordmark" href="/"><span class="mark" aria-hidden="true"></span>OpenFault</a>
-  <span class="sep">/</span>
-  <details class="dd switch">
-    <summary class="btn ghost sm">{% if let Some(p) = me.scope %}{{ p.name }}{% else %}All projects{% endif %} {{ crate::ui::icon("caret-down")|safe }}</summary>
-    <div class="pop">
-      <a href="/{% if me.at("releases") %}releases{% else %}issues{% endif %}">All projects</a><hr>
-      {% for p in me.projects %}<a href="/projects/{{ p.slug }}/{% if me.at("releases") %}releases{% else %}issues{% endif %}">{{ p.name }}</a>{% endfor %}
-    </div>
-  </details>
-  <span class="live" id="live" title="Live updates">Live</span>
-  <form class="search" action="{{ me.base("issues") }}" role="search">
-    {{ crate::ui::icon("magnifying-glass")|safe }}<input type="search" name="q" id="gq" placeholder="Search issues" aria-label="Search issues" autocomplete="off"><kbd>&#8984;K</kbd>
-  </form>
-  <label for="s-t" class="s-btn btn ghost sm icon" aria-label="Search">{{ crate::ui::icon("magnifying-glass")|safe }}</label>
-  <details class="dd">
-    <summary class="avatar" aria-label="Account menu">{{ me.initials() }}</summary>
-    <div class="pop r">
-      <div class="meta"><b>{% if me.name.is_empty() %}{{ me.email }}{% else %}{{ me.name }}{% endif %}</b><br>{{ me.email }}</div>
-      <hr>
-      <div class="meta">Theme</div>
-      <div class="seg theme" role="radiogroup" aria-label="Theme"><button type="button" role="radio" data-theme-set="" title="System">{{ crate::ui::icon("monitor")|safe }}System</button><button type="button" role="radio" data-theme-set="light" title="Light">{{ crate::ui::icon("sun")|safe }}Light</button><button type="button" role="radio" data-theme-set="dark" title="Dark">{{ crate::ui::icon("moon")|safe }}Dark</button></div>
-      <hr>
-      <a href="/tv">{{ crate::ui::icon("television")|safe }}Open TV mode</a>
-      <a href="/settings/account">{{ crate::ui::icon("user-circle")|safe }}Account</a>
-      <a href="/settings/notifications">{{ crate::ui::icon("bell")|safe }}Notifications</a>
-      <form method="post" action="/logout"><button>{{ crate::ui::icon("sign-out")|safe }}Sign out</button></form>
-    </div>
-  </details>
-</header>
 <div class="shell">
   <nav class="side" aria-label="Main">
-    <a href="/"{% if me.path == "/" %} class="on"{% endif %}>{{ crate::ui::icon("squares-four")|safe }}Dashboard</a>
-    <a href="{{ me.base("issues") }}"{% if me.at("issues") %} class="on"{% endif %}>{{ crate::ui::icon("bug")|safe }}Issues</a>
-    <a href="{{ me.base("releases") }}"{% if me.at("releases") %} class="on"{% endif %}>{{ crate::ui::icon("tag")|safe }}Releases</a>
-    <a href="/settings{% if !me.is_admin() %}/account{% endif %}"{% if me.at("settings") %} class="on"{% endif %}>{{ crate::ui::icon("gear")|safe }}Settings</a>
-    {% if !me.views.is_empty() %}
-    <div class="label">Saved views</div>
-    {% for v in me.views %}<div class="view"><a href="{{ v.href }}">{{ crate::ui::icon("funnel")|safe }}{{ v.name }}</a><form method="post" action="/views/{{ v.id }}/delete"><button class="ghost sm icon" aria-label="Delete view {{ v.name }}" title="Delete view">{{ crate::ui::icon("x")|safe }}</button></form></div>{% endfor %}
-    {% endif %}
-    <a class="tvlink" href="/tv">{{ crate::ui::icon("television")|safe }}TV mode</a>
+    <a class="brand" href="/"><span class="mark" aria-hidden="true"></span><span class="ell"><b>OpenFault</b>{% if !me.org.is_empty() %}<small>{{ me.org }}</small>{% endif %}</span></a>
+    <div class="nav">
+      <details class="grp" data-sec="overview" open><summary>{{ crate::ui::icon("caret-down")|safe }}Overview</summary>
+        <a href="/"{% if me.path == "/" %} class="on" aria-current="page"{% endif %}>{{ crate::ui::icon("squares-four")|safe }}Dashboard</a>
+        <a href="/issues"{% if me.at("issues") && me.scope.is_none() %} class="on" aria-current="page"{% endif %}>{{ crate::ui::icon("bug")|safe }}Issues</a>
+        <a href="{{ me.base("releases") }}"{% if me.at("releases") %} class="on" aria-current="page"{% endif %}>{{ crate::ui::icon("tag")|safe }}Releases</a>
+      </details>
+      <details class="grp" data-sec="projects" open><summary>{{ crate::ui::icon("caret-down")|safe }}Projects</summary>
+        <div id="side-p" hx-get="{{ me.url }}" hx-select="#side-p" hx-trigger="sse:tick throttle:1s" hx-swap="outerHTML">
+        {% for p in me.projects %}{% let n = me.count(p.id) %}<a href="/projects/{{ p.slug }}/issues"{% if me.on_project(p.id) %} class="on" aria-current="page"{% endif %} title="{{ p.name }}">{{ crate::ui::icon(crate::ui::platform_icon(p.platform))|safe }}<span class="ell">{{ p.name }}</span>{% if n > 0 %}<span class="ct">{{ crate::ui::n(n) }}</span>{% endif %}</a>{% endfor %}
+        </div>
+        {% if me.is_admin() %}<a class="add" href="/settings/projects">{{ crate::ui::icon("plus")|safe }}New project</a>{% endif %}
+      </details>
+      {% if !me.views.is_empty() %}
+      <details class="grp" data-sec="views" open><summary>{{ crate::ui::icon("caret-down")|safe }}Views</summary>
+        {% for v in me.views %}<div class="view"><a href="{{ v.href }}">{{ crate::ui::icon("funnel")|safe }}<span class="ell">{{ v.name }}</span></a><form method="post" action="/views/{{ v.id }}/delete"><button class="ghost sm icon" aria-label="Delete view {{ v.name }}" title="Delete view">{{ crate::ui::icon("x")|safe }}</button></form></div>{% endfor %}
+      </details>
+      {% endif %}
+      {% if !me.teams.is_empty() %}
+      <details class="grp" data-sec="teams" open><summary>{{ crate::ui::icon("caret-down")|safe }}Teams</summary>
+        {% for (slug, name) in me.teams %}<a href="/issues?q=is%3Aunresolved%20team%3A{{ slug }}">{{ crate::ui::icon("users-three")|safe }}<span class="ell">{{ name }}</span></a>{% endfor %}
+      </details>
+      {% endif %}
+    </div>
+    <div class="foot">
+      <a href="/tv">{{ crate::ui::icon("television")|safe }}TV mode</a>
+      <a href="/settings{% if !me.is_admin() %}/account{% endif %}"{% if me.at("settings") %} class="on" aria-current="page"{% endif %}>{{ crate::ui::icon("gear")|safe }}Settings</a>
+      <span class="live" id="live" title="Live updates">Live</span>
+      <details class="dd me">
+        <summary aria-label="Account menu"><span class="avatar s">{{ me.initials() }}</span><span class="ell">{% if me.name.is_empty() %}{{ me.email }}{% else %}{{ me.name }}{% endif %}</span>{{ crate::ui::icon("caret-down")|safe }}</summary>
+        <div class="pop up">
+          <div class="meta"><b>{% if me.name.is_empty() %}{{ me.email }}{% else %}{{ me.name }}{% endif %}</b><br>{{ me.email }}</div>
+          <hr>
+          <div class="meta">Theme</div>
+          <div class="seg theme" role="radiogroup" aria-label="Theme"><button type="button" role="radio" data-theme-set="" title="System">{{ crate::ui::icon("monitor")|safe }}System</button><button type="button" role="radio" data-theme-set="light" title="Light">{{ crate::ui::icon("sun")|safe }}Light</button><button type="button" role="radio" data-theme-set="dark" title="Dark">{{ crate::ui::icon("moon")|safe }}Dark</button></div>
+          <hr>
+          <a href="/settings/account">{{ crate::ui::icon("user-circle")|safe }}Account</a>
+          <a href="/settings/notifications">{{ crate::ui::icon("bell")|safe }}Notifications</a>
+          <form method="post" action="/logout"><button>{{ crate::ui::icon("sign-out")|safe }}Sign out</button></form>
+        </div>
+      </details>
+    </div>
   </nav>
-  <main class="content"><div class="wrap">{% block content %}{% endblock %}</div></main>
+  <div class="main">
+    <header class="top">
+      <label for="nav-t" class="menu-btn btn ghost sm icon" aria-label="Menu">{{ crate::ui::icon("list")|safe }}</label>
+      <nav class="crumb" aria-label="Breadcrumb">{% if let Some(p) = me.scope %}<a href="/projects/{{ p.slug }}/issues">{{ p.name }}</a>{% if !me.section().is_empty() %}<span class="sep">›</span>{% endif %}{% endif %}<span>{{ me.section() }}</span></nav>
+      <form class="search" action="{{ me.base("issues") }}" role="search">
+        {{ crate::ui::icon("magnifying-glass")|safe }}<input type="search" name="q" id="gq" placeholder="Search issues" aria-label="Search issues" autocomplete="off"><kbd>&#8984;K</kbd>
+      </form>
+      <label for="s-t" class="s-btn btn ghost sm icon" aria-label="Search">{{ crate::ui::icon("magnifying-glass")|safe }}</label>
+    </header>
+    <main class="content"><div class="wrap">{% block content %}{% endblock %}</div></main>
+  </div>
 </div>
 {% if let Some(f) = me.flash %}<div class="toast" role="status">{{ crate::ui::icon("check-circle")|safe }}{{ f }}</div>{% endif %}
 </div>

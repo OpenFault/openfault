@@ -11,8 +11,8 @@ use crate::{
 };
 use axum::{
     Json,
-    extract::State,
-    http::{HeaderMap, StatusCode, header},
+    extract::{FromRequest, Request, State},
+    http::{StatusCode, header},
 };
 use rmcp::schemars::{self, JsonSchema};
 use rusqlite::{Connection, params};
@@ -37,6 +37,18 @@ pub struct ProjectIn {
     pub name: String,
     /// ruby | javascript | node | python | other
     pub platform: String,
+}
+/// `SetupReq`'s schema, parsed only after the setup-open check so a closed setup answers first.
+#[derive(Deserialize)]
+#[serde(transparent)]
+pub struct SetupArgs(pub Value);
+impl JsonSchema for SetupArgs {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        SetupReq::schema_name()
+    }
+    fn json_schema(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        SetupReq::json_schema(g)
+    }
 }
 #[derive(Deserialize, JsonSchema)]
 pub struct SetupReq {
@@ -247,12 +259,10 @@ pub async fn bootstrap(
     }))
 }
 
-/// `POST /api/v1/setup` with `Authorization: Bearer <setup token>`. 410 once a user exists.
-pub async fn rest(
-    State(st): State<AppState>,
-    h: HeaderMap,
-    Json(r): Json<SetupReq>,
-) -> Result<Json<Value>, ApiErr> {
+/// `POST /api/v1/setup` with `Authorization: Bearer <setup token>`. 410 once a user exists,
+/// then 401 for a bad token, and only then is the body parsed (415/422).
+pub async fn rest(State(st): State<AppState>, req: Request) -> Result<Json<Value>, ApiErr> {
+    let h = req.headers().clone();
     let bearer = h
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
@@ -274,6 +284,9 @@ pub async fn rest(
             "invalid setup token".into(),
         ));
     }
+    let Json(r) = Json::<SetupReq>::from_request(req, &st)
+        .await
+        .map_err(|e| ApiErr(e.status(), e.body_text()))?;
     let host = h.get(header::HOST).and_then(|v| v.to_str().ok());
     bootstrap(&st, &bearer, r, host).await.map(Json)
 }

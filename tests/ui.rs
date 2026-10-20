@@ -737,3 +737,65 @@ async fn settings_devices_pairing_flow() {
     assert_eq!(r.status, StatusCode::OK);
     assert!(r.body.contains("Devices"));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sidebar_projects_counts_teams_breadcrumb() {
+    let (app, c, db, _d) = admin_app().await;
+    db.write(|c| {
+        c.execute_batch(
+            "INSERT INTO projects (id, org_id, slug, name, platform, created_at) VALUES
+               (20, 1, 'mobile', 'Mobile', 'python', 0), (21, 1, 'hidden', 'Hidden', 'ruby', 0);
+             INSERT INTO issues (project_id, fingerprint, title, status, first_seen, last_seen) VALUES
+               (20, 'a', 'MobBoom', 'unresolved', 1, 1), (20, 'b', 'MobTwo', 'unresolved', 1, 1),
+               (20, 'c', 'MobDone', 'resolved', 1, 1),
+               ((SELECT id FROM projects WHERE slug = 'web-app'), 'd', 'WebBoom', 'unresolved', 1, 1);
+             INSERT INTO users (id, email, name, pw_hash, created_at) VALUES (50, 'bob@acme.io', 'Bob', 'x', 0);
+             INSERT INTO teams (id, name, slug, created_at) VALUES (7, 'Core', 'core', 0);
+             INSERT INTO team_members (team_id, user_id) VALUES (7, 50);
+             INSERT INTO team_projects (team_id, project_id) VALUES (7, 20);",
+        )
+    })
+    .await
+    .unwrap();
+    let get = |u: &'static str, ck: String| {
+        let app = app.clone();
+        async move { req(&app, "GET", u, &ck, "", FORM).await.body }
+    };
+
+    // admin: every project, counts, no Teams section, no switcher, breadcrumb
+    let b = get("/issues", c.clone()).await;
+    assert!(b.contains("href=\"/projects/web-app/issues\" title=\"Web App\">"));
+    assert!(b.contains("href=\"/projects/hidden/issues\" title=\"Hidden\">"));
+    assert!(b.contains("Mobile</span><span class=\"ct\">2</span>"));
+    assert!(
+        !b.contains("Hidden</span><span class=\"ct\">"),
+        "zero shows nothing"
+    );
+    assert!(!b.contains("All projects") && !b.contains("data-sec=\"teams\""));
+    assert!(b.contains("class=\"crumb\"") && b.contains("New project"));
+    assert!(b.contains("id=\"side-p\" hx-get=") && b.contains("hx-select=\"#side-p\""));
+
+    // scoped page: active row + Project › Issues
+    let b = get("/projects/mobile/issues", c.clone()).await;
+    assert!(b.contains("href=\"/projects/mobile/issues\" class=\"on\" aria-current=\"page\""));
+    assert!(!b.contains("href=\"/projects/web-app/issues\" class=\"on\""));
+    assert!(b.contains("<a href=\"/projects/mobile/issues\">Mobile</a><span class=\"sep\">›</span><span>Issues</span>"));
+
+    // team token narrows the list to the team's projects
+    let b = get("/issues?q=team%3Acore", c.clone()).await;
+    assert!(b.contains("MobBoom") && !b.contains("WebBoom"));
+
+    // member via team: only visible projects, Teams section, no admin add
+    let st = openfault::AppState::new(db.clone());
+    let bob = openfault::auth::login(&st, 50).await.unwrap();
+    let bob = bob.split(';').next().unwrap().to_string();
+    let b = get("/issues", bob).await;
+    assert!(b.contains("href=\"/projects/mobile/issues\""));
+    assert!(!b.contains("/projects/hidden/issues") && !b.contains("/projects/web-app/issues"));
+    assert!(b.contains("data-sec=\"teams\"") && b.contains("team%3Acore\">"));
+    assert!(!b.contains("New project"));
+
+    // sort select: caret only, no stray left icon
+    let css = include_str!("../static/app.css");
+    assert!(!css.contains(".sel-wrap>.i") && !b.contains("arrows-down-up"));
+}

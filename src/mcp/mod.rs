@@ -827,13 +827,15 @@ impl Mcp {
     )]
     async fn setup_instance(
         &self,
-        Parameters(a): Parameters<crate::setup::SetupReq>,
+        Parameters(a): Parameters<crate::setup::SetupArgs>,
         Extension(p): Extension<Parts>,
     ) -> Out {
+        // ponytail: no SetupAuth here means a user exists (a normal token needs one)
         let t = p
             .extensions
             .get::<SetupAuth>()
-            .ok_or("only available with the setup token, before the first user exists")?;
+            .ok_or("setup already completed")?;
+        let a = serde_json::from_value(a.0).map_err(|e| e.to_string())?;
         let v = crate::setup::bootstrap(&self.st, &t.0, a, host(&p))
             .await
             .map_err(|e| e.1)?;

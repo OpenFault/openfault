@@ -42,6 +42,8 @@ pub struct IssueFilter {
     pub assignee_id: Option<i64>,
     pub approved: Option<bool>,
     pub text: Option<String>,
+    /// team slug: only that team's projects (still within `project_ids`)
+    pub team: Option<String>,
     /// last_seen >= since
     pub since: Option<i64>,
     /// last_seen <= until
@@ -72,7 +74,7 @@ pub struct IssueRow {
     pub sparkline: Vec<i64>,
 }
 
-/// Tokens: `is:unresolved|resolved|muted level:x release:x env:x assignee:me|<id> approved:yes|no`;
+/// Tokens: `is:unresolved|resolved|muted level:x release:x env:x assignee:me|<id> approved:yes|no team:slug`;
 /// everything else (bare or "quoted") is free text.
 pub fn parse_query(q: &str, mut f: IssueFilter) -> IssueFilter {
     let mut text = Vec::new();
@@ -101,6 +103,7 @@ pub fn parse_query(q: &str, mut f: IssueFilter) -> IssueFilter {
             "assignee" if v.parse::<i64>().is_ok() => f.assignee_id = v.parse().ok(),
             "approved" if v == "yes" => f.approved = Some(true),
             "approved" if v == "no" => f.approved = Some(false),
+            "team" => f.team = Some(v),
             _ => text.push(t),
         }
     }
@@ -108,6 +111,19 @@ pub fn parse_query(q: &str, mut f: IssueFilter) -> IssueFilter {
         f.text = Some(text.join(" "));
     }
     f
+}
+
+/// Unresolved issue count per project, one grouped query (projects with none are absent).
+pub fn unresolved_counts(
+    c: &Connection,
+    ids: &[i64],
+) -> rusqlite::Result<std::collections::HashMap<i64, i64>> {
+    c.prepare(&format!(
+        "SELECT project_id, count(*) FROM issues WHERE status = 'unresolved' AND project_id IN ({}) GROUP BY project_id",
+        ids_in(ids)
+    ))?
+    .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+    .collect()
 }
 
 const ROW_COLS: &str =
@@ -224,6 +240,12 @@ fn list_sync(c: &Connection, f: &IssueFilter) -> rusqlite::Result<(Vec<IssueRow>
     }
     if let Some(a) = f.assignee_id {
         add("i.assignee_id = ?", vec![a.into()]);
+    }
+    if let Some(t) = &f.team {
+        add(
+            "i.project_id IN (SELECT tp.project_id FROM team_projects tp JOIN teams t ON t.id = tp.team_id WHERE t.slug = ?)",
+            vec![t.clone().into()],
+        );
     }
     match f.approved {
         Some(true) => add("i.approved_at IS NOT NULL", vec![]),

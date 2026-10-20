@@ -221,6 +221,7 @@ fn filter(s: &Scope, project_ids: Vec<i64>, q: ListQ) -> Result<IssueFilter, Api
         cursor: q.cursor,
         limit: q.limit.unwrap_or(25).min(100),
         text: None,
+        team: None,
     };
     let mut f = issues::parse_query(q.q.as_deref().unwrap_or(""), base);
     if f.assignee_id == Some(ME) {

@@ -26,6 +26,12 @@
     b.classList.toggle("on", on); b.setAttribute("aria-checked", on);
   });
   if (!$(".tv")) mark();
+  // sidebar sections remember collapsed state
+  $$("details.grp[data-sec]").forEach(g => {
+    const k = "of-side:" + g.dataset.sec;
+    if (load(k) === "0") g.open = false;
+    g.addEventListener("toggle", () => store(k, g.open ? null : "0"));
+  });
 
   // charts animate on first paint only; live swaps just update
   setTimeout(() => root.classList.add("settled"), 1200);
@@ -66,7 +72,7 @@
   let snap = null;
   d.addEventListener("htmx:beforeSwap", e => {
     const t = e.detail.target;
-    if (!t || !t.matches("[hx-trigger^='sse:']")) return;
+    if (!t || t.id === "side-p" || !t.matches("[hx-trigger^='sse:']")) return;
     snap = { n: {}, k: new Set($$("[data-k]", t).map(x => x.dataset.k)) };
     $$("[data-n][id]", t).forEach(x => snap.n[x.id] = +x.dataset.n);
   });

@@ -153,6 +153,15 @@ async fn rest_setup_with_token() {
     assert_eq!(q(&t.db, "SELECT count(*) FROM setup_token").await, 0);
     let (s, _) = req(&t, "POST", "/api/v1/setup", &tok, Some(body())).await;
     assert_eq!(s, StatusCode::GONE);
+    // closed setup answers 410 before token or body checks
+    for (k, b) in [
+        ("", None),
+        ("nope", Some(String::new())),
+        (api, Some("{}".into())),
+    ] {
+        let (s, _) = req(&t, "POST", "/api/v1/setup", k, b).await;
+        assert_eq!(s, StatusCode::GONE);
+    }
     let (_, loc, _, _) = form(&t, "GET", "/setup", "", "").await;
     assert_eq!(loc, "/login");
 }
@@ -272,8 +281,10 @@ async fn mcp_setup_and_admin_tools() {
         1
     );
     // the setup call cannot be replayed with the new api token
-    let (err, _) = call(&t, &api, "setup_instance", args).await;
-    assert!(err);
+    let (err, out) = call(&t, &api, "setup_instance", args).await;
+    assert!(err && out.contains("setup already completed"), "{out}");
+    let (err, out) = call(&t, &api, "setup_instance", json!({})).await;
+    assert!(err && out.contains("setup already completed"), "{out}");
 }
 
 #[tokio::test]

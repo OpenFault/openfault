@@ -137,7 +137,7 @@ pub fn render(t: impl Template) -> R {
     Ok(Html(t.render()?).into_response())
 }
 /// static asset cache-buster; bump when static/ changes.
-pub const V: &str = "0.1.0-m3.11";
+pub const V: &str = "0.1.0-m3.12";
 
 /// A Phosphor icon from the sprite (`static/icons.svg`); render with `|safe`.
 pub fn icon(name: &str) -> String {
@@ -179,6 +179,11 @@ pub struct Me {
     pub user: CurrentUser,
     pub projects: Vec<Project>,
     pub views: Vec<SavedView>,
+    /// unresolved issues per visible project (sidebar pills)
+    pub counts: std::collections::HashMap<i64, i64>,
+    /// (slug, name) of teams the user belongs to
+    pub teams: Vec<(String, String)>,
+    pub org: String,
     pub flash: Option<String>,
     pub path: String,
     /// path + query, what live fragments re-fetch
@@ -207,6 +212,23 @@ impl Me {
             None => format!("/{page}"),
         }
     }
+    pub fn count(&self, id: &i64) -> i64 {
+        self.counts.get(id).copied().unwrap_or(0)
+    }
+    /// sidebar row is the page's project
+    pub fn on_project(&self, id: &i64) -> bool {
+        self.scope.as_ref().is_some_and(|p| p.id == *id)
+    }
+    /// breadcrumb leaf for the current page
+    pub fn section(&self) -> &'static str {
+        let segs = ["settings", "releases", "issues", "tv"];
+        let names = ["Settings", "Releases", "Issues", "TV"];
+        match segs.iter().position(|s| self.at(s)) {
+            Some(i) => names[i],
+            None if self.path == "/" => "Dashboard",
+            None => "",
+        }
+    }
     pub fn project_name(&self, id: &i64) -> &str {
         self.projects
             .iter()
@@ -230,10 +252,11 @@ impl FromRequestParts<AppState> for Me {
         let user = CurrentUser::from_request_parts(p, st).await?;
         let projects = visible_projects(st, &user).await.unwrap_or_default();
         let uid = user.id;
-        let views = st
+        let ids: Vec<i64> = projects.iter().map(|p| p.id).collect();
+        let (views, counts, teams, org) = st
             .db
             .read(move |c| {
-                c.prepare("SELECT id, name, query, sort FROM saved_views WHERE user_id = ?1 ORDER BY name")?
+                let views = c.prepare("SELECT id, name, query, sort FROM saved_views WHERE user_id = ?1 ORDER BY name")?
                     .query_map([uid], |r| {
                         let (q, s): (String, String) = (r.get(2)?, r.get(3)?);
                         Ok(SavedView {
@@ -242,7 +265,16 @@ impl FromRequestParts<AppState> for Me {
                             href: format!("/issues?q={}&sort={}", enc(&q), enc(&s)),
                         })
                     })?
-                    .collect()
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                let teams = c
+                    .prepare("SELECT t.slug, t.name FROM team_members m JOIN teams t ON t.id = m.team_id WHERE m.user_id = ?1 ORDER BY t.name")?
+                    .query_map([uid], |r| Ok((r.get(0)?, r.get(1)?)))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                let org = c
+                    .query_row("SELECT name FROM orgs WHERE id = 1", [], |r| r.get(0))
+                    .optional()?
+                    .unwrap_or_default();
+                Ok((views, crate::issues::unresolved_counts(c, &ids)?, teams, org))
             })
             .await
             .unwrap_or_default();
@@ -255,6 +287,9 @@ impl FromRequestParts<AppState> for Me {
             user,
             projects,
             views,
+            counts,
+            teams,
+            org,
             flash,
             path: p.uri.path().to_string(),
             url: p
@@ -374,6 +409,15 @@ fn hex(b: &[u8]) -> String {
 }
 
 const PLATFORMS: [&str; 5] = ["ruby", "javascript", "node", "python", "other"];
+pub fn platform_icon(p: &str) -> &'static str {
+    match p {
+        "ruby" => "diamond",
+        "javascript" => "file-js",
+        "node" => "hexagon",
+        "python" => "file-py",
+        _ => "cube",
+    }
+}
 pub(crate) fn platform(p: &str) -> &str {
     if PLATFORMS.contains(&p) { p } else { "other" }
 }

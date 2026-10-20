@@ -14,7 +14,7 @@
 </div>
 <form class="qbar" action="{{ base }}" role="search">
   <div class="qin">{{ crate::ui::icon("magnifying-glass")|safe }}<input name="q" id="q" value="{{ q }}" placeholder='is:unresolved level:error release:1.2 env:production "timeout"' aria-label="Filter issues" autocomplete="off" spellcheck="false"></div>
-  <label class="sel-wrap" title="Sort">{{ crate::ui::icon("arrows-down-up")|safe }}<select name="sort" aria-label="Sort" data-autosubmit>{% for (v, l) in [("last_seen", "Last seen"), ("first_seen", "First seen"), ("events", "Events"), ("users", "Users")] %}<option value="{{ v }}"{% if *v == sort %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+  <label class="sel-wrap" title="Sort"><select name="sort" aria-label="Sort" data-autosubmit>{% for (v, l) in [("last_seen", "Last seen"), ("first_seen", "First seen"), ("events", "Events"), ("users", "Users")] %}<option value="{{ v }}"{% if *v == sort %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
   <details class="dd">
     <summary class="btn secondary icon" aria-label="Search syntax" title="Search syntax">{{ crate::ui::icon("info")|safe }}</summary>
     <div class="pop r keys"><div class="meta">Search keys</div>
