@@ -1,0 +1,7 @@
+{
+  "method": "POST",
+  "path": "/api/1/envelope/",
+  "content-type": "application/x-sentry-envelope",
+  "content-encoding": "",
+  "x-sentry-auth": "Sentry sentry_version=7, sentry_client=sentry-ruby/5.28.1, sentry_timestamp=1792498624, sentry_key=abcdef0123456789abcdef0123456789"
+}

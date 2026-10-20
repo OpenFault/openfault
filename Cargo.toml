@@ -1,0 +1,33 @@
+[package]
+name = "openfault"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "time"] }
+tower-http = { version = "0.6", features = ["decompression-gzip", "decompression-br", "decompression-deflate", "decompression-zstd", "limit", "trace"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+blake3 = "1"
+regex = "1"
+uuid = { version = "1", features = ["v7", "serde"] }
+jiff = "0.2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+zstd = "0.13"
+mimalloc = "0.1"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+flate2 = "1"
+tempfile = "3"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"
+opt-level = 3

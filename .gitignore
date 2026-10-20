@@ -1,0 +1,6 @@
+target/
+data/
+*.sqlite3*
+.env
+.DS_Store
+node_modules/

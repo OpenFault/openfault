@@ -1,0 +1,4 @@
+{
+  "method": "POST",
+  "path": "/api/1/envelope/?sentry_version=7&sentry_key=abcdef0123456789abcdef0123456789&sentry_client=sentry.javascript.node%2F11.8.0"
+}

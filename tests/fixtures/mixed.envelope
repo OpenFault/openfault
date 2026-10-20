@@ -1,0 +1,9 @@
+{"event_id":"ee5fa04c6d2c4b3de4a5f60718293a4b","dsn":"https://0123456789abcdef0123456789abcdef@localhost:8080/1"}
+{"type":"transaction"}
+{"event_id":"ff60b15d7e3d4c4ef5b6071829304b5c","type":"transaction","transaction":"GET /checkout","start_timestamp":1792490400.0,"timestamp":1792490400.5,"spans":[],"contexts":{"trace":{"trace_id":"0af7651916cd43dd8448eb211c80319c","span_id":"b7ad6b7169203331"}}}
+{"type":"session"}
+{"sid":"7c6b5a49-8382-4716-a1f0-e9d8c7b6a5f4","status":"ok","started":"2026-10-20T10:00:00Z","attrs":{"release":"web@2.3.0"}}
+{"type":"event"}
+{"event_id":"ee5fa04c6d2c4b3de4a5f60718293a4b","platform":"node","level":"error","exception":{"values":[{"type":"Error","value":"checkout failed: card_declined","stacktrace":{"frames":[{"filename":"/app/src/checkout.js","abs_path":"/app/src/checkout.js","function":"pay","lineno":88,"in_app":true}]}}]}}
+{"type":"client_report"}
+{"discarded_events":[]}

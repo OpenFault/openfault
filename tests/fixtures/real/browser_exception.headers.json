@@ -1,0 +1,5 @@
+{
+  "method": "POST",
+  "path": "/api/1/envelope/?sentry_version=7&sentry_key=abcdef0123456789abcdef0123456789&sentry_client=sentry.javascript.browser%2F11.8.0",
+  "content-type": "text/plain;charset=UTF-8"
+}

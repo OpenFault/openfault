@@ -1,0 +1,13 @@
+services:
+  openfault:
+    image: ghcr.io/openfault/openfault:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - openfault-data:/data
+    restart: unless-stopped
+    # environment:
+    #   OPENFAULT_BASE_URL: https://errors.example.com
+
+volumes:
+  openfault-data:

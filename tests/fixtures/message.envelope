@@ -1,0 +1,3 @@
+{"event_id":"dd4e9f3b5c1b4a2cd3f4e5061728394a","dsn":"https://0123456789abcdef0123456789abcdef@localhost:8080/1"}
+{"type":"event"}
+{"event_id":"dd4e9f3b5c1b4a2cd3f4e5061728394a","platform":"ruby","level":"warning","message":"Payment webhook for order 1234 retried 3 times","release":"1.4.2"}

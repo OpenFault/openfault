@@ -1,0 +1,3 @@
+{"sent_at":"2026-10-20T12:15:51.387Z","sdk":{"name":"sentry.javascript.node","version":"11.8.0"}}
+{"type":"session"}
+{"sid":"4c4e88ed15fc420392f90dd6dd955177","init":false,"started":"2026-10-20T12:15:51.370Z","timestamp":"2026-10-20T12:15:51.387Z","status":"exited","errors":1,"did":"42","duration":0.016386747360229492,"attrs":{"release":"1.2.3","environment":"test","user_agent":"Node.js/26"}}
