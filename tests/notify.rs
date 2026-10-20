@@ -154,10 +154,10 @@ async fn pipeline_email_webhook_push_dedupe_prefs() {
         .to_str()
         .unwrap()
         .to_string();
-    assert_eq!(
-        sig,
-        notify::webhook::signature("s3cret", &serde_json::to_vec(&hooks[0].2).unwrap())
-    );
+    let ts = hooks[0].1["x-openfault-timestamp"].to_str().unwrap();
+    assert!((ts.parse::<i64>().unwrap() - openfault::db::now()).abs() < 60);
+    let signed = format!("{ts}.{}", serde_json::to_string(&hooks[0].2).unwrap());
+    assert_eq!(sig, notify::webhook::signature("s3cret", signed.as_bytes()));
     let relays: Vec<_> = seen
         .lock()
         .unwrap()
@@ -169,6 +169,8 @@ async fn pipeline_email_webhook_push_dedupe_prefs() {
     assert_eq!(relays[0].1["authorization"], "Bearer rt");
     assert_eq!(relays[0].2["tokens"], json!(["aa11", "bb22"]));
     assert_eq!(relays[0].2["collapse_id"], format!("issue-{issue}"));
+    assert_eq!(relays[0].2["category"], "ISSUE");
+    assert_eq!(relays[0].2["thread_id"], issue.to_string());
     // 410 from the relay deletes the device.
     assert_eq!(q(&t.db, "SELECT count(*) FROM devices").await, 1);
     let log = notify::recent_deliveries(&t.db, 1, 10).await.unwrap();
@@ -285,7 +287,8 @@ fn migrate_adds_missing_columns_once() {
     c.execute_batch(
         "CREATE TABLE issues (id INTEGER PRIMARY KEY);
          CREATE TABLE webhooks (id INTEGER PRIMARY KEY, url TEXT);
-         CREATE TABLE devices (id INTEGER PRIMARY KEY, push_token TEXT);",
+         CREATE TABLE devices (id INTEGER PRIMARY KEY, push_token TEXT);
+         CREATE TABLE projects (id INTEGER PRIMARY KEY);",
     )
     .unwrap();
     notify::migrate(&c).unwrap();
@@ -339,4 +342,6 @@ async fn failed_webhook_backs_off_and_queue_is_capped() {
         .await
         .unwrap();
     assert_eq!(total, notify::MAX_PENDING);
+    let h = notify::project_health(&t.db, 1).await.unwrap();
+    assert_eq!((h.queued, h.dropped), (notify::MAX_PENDING, 6));
 }

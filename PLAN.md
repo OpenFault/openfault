@@ -2,7 +2,7 @@
 
 Open-source (MIT), self-hosted, Sentry-compatible error tracker. One container, SQLite, MCP-first API, native iOS app. First users: FeatureOS, SupportWire. Goal: replace Sentry and Bugsink for small and mid-size teams, with a UI that is a delight to use.
 
-Status: planning, decisions 1–3 below accepted on 2026-10-20. Repo: `github.com/OpenFault/openfault` (private until launch). iOS: `github.com/OpenFault/openfault-ios`.
+Status (2026-10-20, commit 9613d3d): M0–M6 built and pushed; M7 iOS in progress; M8 pending. Repo: `github.com/OpenFault/openfault` (private until launch). iOS: `github.com/OpenFault/openfault-ios`. Landing: `github.com/OpenFault/openfault.dev` (Cloudflare Pages).
 
 ## 0. Principles
 
@@ -54,7 +54,8 @@ Config: env vars only. `OPENFAULT_DATA=/data`, `OPENFAULT_PORT=8080`, `OPENFAULT
 |---|---|---|
 | HTTP | axum 0.8, tower-http 0.6 (`decompression-gzip/br/deflate`, `limit`, `compression`, `trace`) | request decompression on ingest; body cap inside and outside the decompressor (zip bombs) |
 | DB | rusqlite 0.40 `bundled` | lowest RAM, no pool magic; writer thread + read conns |
-| Templates | askama 0.16 + htmx 2.0.11 vendored | compile-time checked, no runtime engine |
+| Templates | askama 0.16 + htmx 2.0.11 + htmx-ext-sse vendored | compile-time checked, no runtime engine |
+| Design | shadcn "Luma" preset (b1VlJj2Q) tokens reimplemented in plain CSS; Inter (self-hosted); Phosphor icons sprite | Karthik's pick; no React/Tailwind at runtime |
 | Assets | rust-embed 8 | disk in debug, embedded in release |
 | Symbolication | symbolic-sourcemapcache 13.9 (+ sourcemap 9.3 for parsing) | zero-copy lookups on a cached blob keyed by debug ID |
 | MCP | rmcp 3.6 (`server`, `macros`, `transport-streamable-http-server`, `with_json_response(true)`) | tracks spec 2026-07-28 and legacy 2025-11-25 handshake; stateless |
@@ -245,13 +246,13 @@ Each milestone ends with a verify step before the next starts.
 
 | # | Deliverable | Verify |
 |---|---|---|
-| M0 | Repo, MIT, README, Cargo skeleton, Dockerfile (distroless, multi-arch), CI, `/healthz`, setup wizard shell | `docker run` boots, RSS < 25 MB |
-| M1 | Ingest: envelope parser, auth, decompression, caps, scrub, inbox, processor, events/issues, grouping, store-by-exception, retention | fixture tests pass; live `@sentry/node` + `sentry-ruby` SDK post lands as one issue each; 1k-event burst stays < 100 MB |
-| M2 | Auth, org, users, sessions, invites, projects, DSN keys, SMTP | invite → accept → sign in → create project → DSN works, all in browser (Chrome) |
-| M3 | UI: dashboard, issue list, detail, releases, settings, saved views, keyboard, charts, light/dark | Chrome review of every page, keyboard-only walkthrough, page weight budget |
-| M4 | REST API + tokens + MCP | `claude mcp add` against local binary; `list_new_issues` → `get_issue` → `link_fix` → `resolve_issue` round trip; unapproved issue is withheld |
-| M5 | Source maps: upload endpoints + resolution | `sentry-cli sourcemaps upload` from a Next.js build, minified frame resolves to file:line |
-| M6 | Notifications: email, webhooks, `openfault relay` mode + hosted relay, preferences, README setup docs | each trigger fires once; prefs honored |
+| M0 | Repo, MIT, README, Cargo skeleton, Dockerfile (distroless, multi-arch), CI, `/healthz`, setup wizard shell | `docker run` boots, RSS < 25 MB ✅ |
+| M1 | Ingest: envelope parser, auth, decompression, caps, scrub, inbox, processor, events/issues, grouping, store-by-exception, retention | fixture tests pass; live `@sentry/node` + `sentry-ruby` SDK post lands as one issue each; 1k-event burst stays < 100 MB ✅ |
+| M2 | Auth, org, users, sessions, invites, projects, DSN keys, SMTP | invite → accept → sign in → create project → DSN works, all in browser (Chrome) ✅ |
+| M3 | UI: dashboard, issue list, detail, releases, settings, saved views, keyboard, charts, light/dark | Chrome review of every page, keyboard-only walkthrough, page weight budget ✅ |
+| M4 | REST API + tokens + MCP | `claude mcp add` against local binary; `list_new_issues` → `get_issue` → `link_fix` → `resolve_issue` round trip; unapproved issue is withheld ✅ |
+| M5 | Source maps: upload endpoints + resolution | `sentry-cli sourcemaps upload` from a Next.js build, minified frame resolves to file:line ✅ |
+| M6 | Notifications: email, webhooks, `openfault relay` mode + hosted relay, preferences, README setup docs | each trigger fires once; prefs honored ✅ |
 | M7 | iOS app + widgets + push | TestFlight build; QR pairing; widgets render; push deep-links |
 | M8 | Dogfood on FeatureOS + SupportWire, docs, public repo, ghcr `:latest` | 2 weeks of real traffic under 100 MB |
 
@@ -269,6 +270,16 @@ Companies will depend on this. Reliability is the product.
 - `PRAGMA quick_check` on boot; refuse to start on a corrupt DB with a clear message. Backup/restore documented.
 - No silent failures: dropped events, failed emails, failed pushes are counted and shown in Settings.
 - Untrusted content is escaped in templates (askama autoescape), fenced in API/MCP output, never logged raw.
+
+## 13c. Polish backlog (post-M6)
+
+- Notifications: show `notif_dropped`/failed counters in Settings → project; concurrent APNs sends in relay; per-minute email batching.
+- Webhooks: proxy bypasses DNS private-IP check (documented in code).
+- UI: 24h sparkline column is low-signal until projects have traffic; "resolved in next release" needs the processor to materialize `fixed_at` on first newer release; frames with no context render as empty expanders.
+- Live: per-user SSE connection cap; lagged-tick counts include invisible projects.
+- Ingest: monthly quota; per-project quota settings UI; "unseen environment" store rule.
+- Auth: SSO (post-v1), teams-as-groups (post-v1), password sign-in from iOS (API).
+- Docs: /docs site content; backup/restore guide; upgrade notes.
 
 ## 14. Out of scope (v1)
 

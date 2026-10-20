@@ -23,9 +23,11 @@ pub fn routes() -> Router<AppState> {
         .route("/projects/{slug}/issues", get(project_issues))
         .route("/projects/{slug}/releases", get(releases))
         .route("/projects/{slug}/stats", get(project_stats))
+        .route("/projects/{slug}/members", get(members))
         .route("/issues", get(all_issues))
         .route("/issues/{id}", get(issue).post(act))
         .route("/issues/{id}/events", get(events))
+        .route("/issues/{id}/markdown", get(markdown))
         .route("/events/{id}", get(event))
         .route("/stats", get(all_stats))
         .route("/me", get(me))
@@ -340,6 +342,38 @@ fn not_approved(mut v: Value) -> Value {
     v["fix_approved"] = false.into();
     v["detail"] = "Fix not approved. Ask a person to approve it in OpenFault.".into();
     v
+}
+
+/// Same text as the UI's `/issues/{id}.md`; unapproved → summary only.
+async fn markdown(s: Scope, State(st): State<AppState>, Path(id): Path<i64>) -> R<Response> {
+    s.issue_project(&st, id).await?;
+    let d = issues::get_issue(&st.db, id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "issue not found"))?;
+    let md = crate::ui::issue_markdown(&d, approved(&st, id).await?);
+    Ok(([(header::CONTENT_TYPE, "text/markdown; charset=utf-8")], md).into_response())
+}
+
+/// Who an issue in this project can be assigned to (same rule as `issues::assignable`).
+async fn members(s: Scope, State(st): State<AppState>, Path(slug): Path<String>) -> R {
+    let pid = s.project(&slug)?.id;
+    let rows: Vec<Value> = st
+        .db
+        .read(move |c| {
+            c.prepare(
+                "SELECT id, name, email, role FROM users WHERE role != 'member'
+                   OR id IN (SELECT user_id FROM project_members WHERE project_id = ?1) ORDER BY name, email",
+            )?
+            .query_map([pid], |r| {
+                Ok(json!({"id": r.get::<_, i64>(0)?, "name": r.get::<_, String>(1)?,
+                    "email": r.get::<_, String>(2)?, "role": r.get::<_, String>(3)?}))
+            })?
+            .collect()
+        })
+        .await
+        .map_err(internal)?;
+    Ok(Json(json!(rows)))
 }
 
 async fn act(

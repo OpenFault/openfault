@@ -78,6 +78,10 @@ pub fn enqueue(c: &Connection, n: &Notification) -> rusqlite::Result<()> {
         params![n.project_id, n.issue_id, n.kind, payload, now(), MAX_ATTEMPTS, MAX_PENDING],
     )?;
     if added == 0 {
+        c.execute(
+            "UPDATE projects SET notif_dropped = notif_dropped + 1 WHERE id = ?1",
+            [n.project_id],
+        )?;
         tracing::warn!(
             project_id = n.project_id,
             issue_id = n.issue_id,
@@ -135,6 +139,7 @@ pub fn migrate(c: &Connection) -> rusqlite::Result<()> {
         ("webhooks", "last_ok_at", "INTEGER"),
         ("devices", "name", "TEXT"),
         ("devices", "token_id", "INTEGER"),
+        ("projects", "notif_dropped", "INTEGER NOT NULL DEFAULT 0"),
     ] {
         let has: bool = c.query_row(
             "SELECT count(*) > 0 FROM pragma_table_info(?1) WHERE name = ?2",
@@ -368,6 +373,29 @@ fn load(
         hooks,
         sent,
     }))
+}
+
+#[derive(Clone, Debug, Default, Serialize, PartialEq)]
+pub struct Health {
+    pub queued: i64,
+    pub failed_24h: i64,
+    pub dropped: i64,
+}
+
+/// Settings counters (PLAN §13b): pending deliveries, deliveries that gave up in the last 24h,
+/// and triggers dropped by the MAX_PENDING cap (lifetime).
+pub async fn project_health(db: &Db, project_id: i64) -> crate::db::Result<Health> {
+    db.read(move |c| {
+        c.query_row(
+            "SELECT
+               (SELECT count(*) FROM notif_queue WHERE project_id = ?1 AND done_at IS NULL AND attempts < ?2),
+               (SELECT count(*) FROM notif_queue WHERE project_id = ?1 AND done_at IS NULL AND attempts >= ?2 AND created_at >= ?3),
+               coalesce((SELECT notif_dropped FROM projects WHERE id = ?1), 0)",
+            params![project_id, MAX_ATTEMPTS, now() - 86400],
+            |r| Ok(Health { queued: r.get(0)?, failed_24h: r.get(1)?, dropped: r.get(2)? }),
+        )
+    })
+    .await
 }
 
 /// One pass over pending rows. Returns how many rows were attempted.

@@ -613,3 +613,41 @@ async fn project_subnav_links_webhooks() {
         .body;
     assert!(b.contains("href=\"/settings/projects/web-app/webhooks\""));
 }
+
+#[tokio::test]
+async fn webhooks_tab_deep_links() {
+    let (app, c, _db, _d) = admin_app().await;
+    let r = req(&app, "GET", HOOKS, &c, "", FORM).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(r.body.contains(&format!(
+        "href=\"{HOOKS}\" class=\"on\" aria-current=\"page\""
+    )));
+    assert!(
+        r.body.contains("queued") && r.body.contains("dropped"),
+        "health line"
+    );
+    let g = req(&app, "GET", "/settings/projects/web-app", &c, "", FORM)
+        .await
+        .body;
+    assert!(g.contains("href=\"/settings/projects/web-app\" class=\"on\" aria-current=\"page\""));
+    assert!(!g.contains(&format!("href=\"{HOOKS}\" class=\"on\"")));
+    assert!(
+        g.contains("class=\"seg snav\""),
+        "settings tabs are a pill segmented control"
+    );
+}
+
+#[tokio::test]
+async fn luma_select_and_checkbox() {
+    let css = include_str!("../static/app.css");
+    assert!(css.contains("select{appearance:none") && css.contains("var(--caret)"));
+    assert!(
+        css.contains("input[type=checkbox]{appearance:none")
+            && css.contains("background-image:var(--ck)")
+    );
+    let (app, c, _db, _d) = admin_app().await;
+    let b = req(&app, "GET", "/settings/members", &c, "", FORM)
+        .await
+        .body;
+    assert!(b.contains("<select name=\"role\">") && b.contains("type=\"checkbox\" name=\"p\""));
+}

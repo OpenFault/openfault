@@ -581,3 +581,52 @@ fn untrusted_text() {
     assert!(s.contains("ok\nnext\t"));
     assert!(!s.contains("```"));
 }
+
+#[tokio::test]
+async fn members_and_markdown() {
+    let t = seeded().await;
+    let (s, v) = req(&t, "GET", "/api/v1/projects/dev/members", MEMBER_W, None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(
+        v,
+        json!([
+            {"id": 1, "name": "Ada", "email": "a@x.io", "role": "admin"},
+            {"id": 2, "name": "Max", "email": "m@x.io", "role": "member"},
+        ])
+    );
+    let (_, v) = req(&t, "GET", "/api/v1/projects/other/members", ADMIN_R, None).await;
+    assert_eq!(ids_of(&v), vec![1], "member 2 isn't in 'other'");
+    let (s, _) = req(&t, "GET", "/api/v1/projects/other/members", MEMBER_W, None).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+
+    let id = q(&t.db, "SELECT id FROM issues WHERE level = 'error' LIMIT 1").await;
+    let uri = format!("/api/v1/issues/{id}/markdown");
+    let (s, h, v) = raw_req(&t, "GET", &uri, ADMIN_R, None, &[]).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(
+        h["content-type"]
+            .to_str()
+            .unwrap()
+            .starts_with("text/markdown")
+    );
+    let md = v.as_str().unwrap();
+    assert!(md.starts_with("# ") && md.contains("- Events: "));
+    assert!(md.contains("Fix not approved. Ask a person to approve it in OpenFault."));
+    assert!(!md.contains("```"), "no stack before approval");
+    issues::apply_action(&t.db, id, 1, IssueAction::Approve)
+        .await
+        .unwrap();
+    let (_, _, v) = raw_req(&t, "GET", &uri, ADMIN_R, None, &[]).await;
+    let md = v.as_str().unwrap();
+    assert!(md.contains("```") && !md.contains("not approved"));
+    let (s, _) = req(&t, "GET", "/api/v1/issues/999999/markdown", ADMIN_R, None).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+}
+
+fn ids_of(v: &Value) -> Vec<i64> {
+    v.as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["id"].as_i64().unwrap())
+        .collect()
+}

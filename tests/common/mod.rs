@@ -142,3 +142,82 @@ pub async fn raw_req(
             .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into())),
     )
 }
+
+// ---------- real-process helpers (tests/crash.rs, tests/load.rs) ----------
+
+/// Schema + project 1 (KEY) and project 2 (KEY2) + any `extra` (id, key) projects, then closes the DB.
+pub async fn seed_dir(dir: &std::path::Path, extra: &[(i64, &str)]) {
+    let db = Db::open(&dir.join("openfault.db")).unwrap();
+    let extra: Vec<(i64, String)> = extra.iter().map(|(i, k)| (*i, k.to_string())).collect();
+    db.write(move |c| {
+        openfault::db::seed_dev(c, KEY)?;
+        let mut all = vec![(2, KEY2.to_string())];
+        all.extend(extra);
+        for (id, key) in all {
+            c.execute(
+                "INSERT INTO projects (id, org_id, slug, name, created_at) VALUES (?1, 1, 'p' || ?1, 'p' || ?1, 0)",
+                [id],
+            )?;
+            c.execute(
+                "INSERT INTO dsn_keys (project_id, public_key, created_at) VALUES (?1, ?2, 0)",
+                rusqlite::params![id, key],
+            )?;
+        }
+        Ok(())
+    })
+    .await
+    .unwrap();
+}
+
+/// Spawns the built binary on `dir`; returns once /healthz answers.
+pub async fn spawn_bin(dir: &std::path::Path) -> (std::process::Child, String) {
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_openfault"))
+        .env("OPENFAULT_DATA", dir)
+        .env("OPENFAULT_PORT", port.to_string())
+        .env("RUST_LOG", "error")
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let base = format!("http://127.0.0.1:{port}");
+    for _ in 0..200 {
+        if reqwest::get(format!("{base}/healthz")).await.is_ok() {
+            return (child, base);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    panic!("binary did not start");
+}
+
+/// One event, own issue (fingerprint = id).
+pub fn envelope_body(id: &str) -> String {
+    format!(
+        "{{\"event_id\":\"{id}\"}}\n{{\"type\":\"event\"}}\n{{\"event_id\":\"{id}\",\"platform\":\"node\",\"level\":\"error\",\"message\":\"boom {id}\",\"fingerprint\":[\"{id}\"]}}\n"
+    )
+}
+
+pub fn sqlite_count(dir: &std::path::Path, sql: &str) -> i64 {
+    rusqlite::Connection::open(dir.join("openfault.db"))
+        .unwrap()
+        .query_row(sql, [], |r| r.get(0))
+        .unwrap()
+}
+
+/// Polls until the inbox is empty; returns how long it took.
+pub async fn wait_inbox_empty(
+    dir: &std::path::Path,
+    max: std::time::Duration,
+) -> std::time::Duration {
+    let t0 = std::time::Instant::now();
+    while sqlite_count(dir, "SELECT count(*) FROM inbox") > 0 {
+        assert!(t0.elapsed() < max, "inbox not drained in {max:?}");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    t0.elapsed()
+}

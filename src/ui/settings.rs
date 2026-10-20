@@ -143,6 +143,7 @@ struct Webhooks {
     project: Project,
     hooks: Vec<webhook::WebhookRow>,
     deliveries: Vec<Delivery>,
+    health: notify::Health,
     error: Option<String>,
     kind: String,
     url: String,
@@ -158,11 +159,13 @@ async fn webhooks_page(
 ) -> R {
     let hooks = webhook::list(&st.db, project.id).await?;
     let deliveries = notify::recent_deliveries(&st.db, project.id, 50).await?;
+    let health = notify::project_health(&st.db, project.id).await?;
     render(Webhooks {
         me,
         project,
         hooks,
         deliveries,
+        health,
         error,
         kind,
         url,

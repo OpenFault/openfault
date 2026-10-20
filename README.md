@@ -41,6 +41,8 @@ Only the DSN changes.
 ~/.cargo/bin/cargo run
 ```
 
+Tests: `cargo test` (includes a SIGKILL crash-safety test and property tests). The 10k-event load check is ignored by default: `cargo test --release -- --ignored load`.
+
 | Variable | Default | Meaning |
 |---|---|---|
 | `OPENFAULT_DATA` | `./data` | Directory for the SQLite database and generated secret |
@@ -77,7 +79,7 @@ OpenFault notifies on four triggers: new issue, regression, unmute (mute expired
 | `OPENFAULT_PUSH_RELAY_TOKEN` | Bearer token for that relay. |
 | `OPENFAULT_ALLOW_PRIVATE_WEBHOOKS` | `1` allows webhook URLs on localhost, private or link-local IPs (and plain `http://` to loopback). Off by default. |
 
-Generic webhooks receive `{"kind", "project", "issue": {"id", "title", "level", "url", "events", "users", "first_seen", "last_seen", "release"}}`. If you set a secret, each request carries `X-OpenFault-Signature: sha256=<hex HMAC-SHA256(secret, raw body)>`.
+Generic webhooks receive `{"kind", "project", "issue": {"id", "title", "level", "url", "events", "users", "first_seen", "last_seen", "release"}}`. If you set a secret, each request carries `X-OpenFault-Timestamp: <unix seconds>` and `X-OpenFault-Signature: sha256=<hex HMAC-SHA256(secret, "{timestamp}.{raw body}")>`. Verify the signature over the timestamp header, a `.` and the raw body, and reject requests whose timestamp is more than ~5 minutes old (replay protection).
 
 **Hosted relay (App Store app).** The APNs key belongs to whoever ships the iOS build, so your server never holds it. Set `OPENFAULT_PUSH_RELAY_URL=https://push.openfault.dev` and the `OPENFAULT_PUSH_RELAY_TOKEN` you were given. The relay only receives device tokens, the issue title, the project name and the deep link.
 

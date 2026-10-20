@@ -161,3 +161,51 @@ async fn ticks_scope_and_summary() {
     );
     assert_eq!(v["latest"].as_array().unwrap().len(), 2);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn bearer_token_streams_and_token_project_narrows() {
+    let t = setup().await;
+    let h = hash_token("of_admin_dev");
+    t.db.write(move |c| {
+        c.execute(
+            "INSERT INTO api_tokens (token_hash, user_id, scopes, project_id) VALUES (?1, 1, 'read', 1)",
+            [h],
+        )
+    })
+    .await
+    .unwrap();
+    let get = |uri: &str, tok: &str| {
+        let r = Request::get(uri)
+            .header("host", "localhost")
+            .header(header::AUTHORIZATION, format!("Bearer {tok}"))
+            .body(Body::empty())
+            .unwrap();
+        t.app.clone().oneshot(r)
+    };
+    let res = get("/live?scope=all", ADMIN_R).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let (mut s, mut buf) = (res.into_body().into_data_stream(), String::new());
+    assert!(next(&mut s, &mut buf, "hello").await["server_time"].is_i64());
+    post_fixture(&t, "node_exception.envelope", 1).await;
+    assert_eq!(next(&mut s, &mut buf, "tick").await["project_id"], 1);
+
+    let status =
+        |uri: &'static str, tok: &'static str| async move { get(uri, tok).await.unwrap().status() };
+    assert_eq!(
+        status("/live?scope=all", "of_bogus").await,
+        StatusCode::UNAUTHORIZED
+    );
+    // admin token pinned to project 1 can't see project 2
+    assert_eq!(
+        status("/live?scope=project:2", "of_admin_dev").await,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        status("/live/summary?scope=project:1", "of_admin_dev").await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        status("/live/summary?scope=project:2", ADMIN_R).await,
+        StatusCode::OK
+    );
+}

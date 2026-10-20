@@ -1,7 +1,7 @@
 {% extends "app.html" %}
 {% block title %}Webhooks · {{ project.name }}{% endblock %}
 {% block content %}
-<div class="head"><h1>{{ project.name }}</h1></div>
+<div class="head"><h1>{{ project.name }}</h1><span class="sm muted health">{{ health.queued }} queued · <span{% if health.failed_24h > 0 %} class="error"{% endif %}>{{ health.failed_24h }} failed (24h)</span> · {{ health.dropped }} dropped</span></div>
 {% include "settings_nav.html" %}
 {% include "project_nav.html" %}
 <div class="form-col">

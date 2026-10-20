@@ -71,6 +71,8 @@ pub async fn send(r: &Relay, i: &Info, tokens: &[String]) -> Result<Vec<TokenRes
         "body": one_line(&i.title, 180),
         "url": i.url,
         "collapse_id": format!("issue-{}", i.id),
+        "category": "ISSUE",
+        "thread_id": i.id.to_string(),
     });
     let res = HTTP
         .post(format!("{}/v1/push", r.url))

@@ -1010,9 +1010,14 @@ async fn show(
     })
 }
 
-/// Plain Markdown for pasting into a ticket or an agent prompt.
 async fn markdown(me: Me, State(st): State<AppState>, id: i64) -> R {
     let d = load(&st, &me, id).await?;
+    let o = issue_markdown(&d, true);
+    Ok(([(header::CONTENT_TYPE, "text/markdown; charset=utf-8")], o).into_response())
+}
+
+/// Plain Markdown for pasting into a ticket or an agent prompt. Unapproved (API) → summary only.
+pub fn issue_markdown(d: &IssueDetail, approved: bool) -> String {
     let r = &d.row;
     let flat = |s: &str| svc::untrusted(s).replace(['\n', '\t'], " ");
     let mut o = format!(
@@ -1028,6 +1033,10 @@ async fn markdown(me: Me, State(st): State<AppState>, id: i64) -> R {
     );
     if let Some(rel) = &r.last_release {
         o += &format!("- Last release: {}\n", svc::untrusted(rel));
+    }
+    if !approved {
+        o += "\nFix not approved. Ask a person to approve it in OpenFault.\n";
+        return o;
     }
     if let Some(ev) = &d.latest_event {
         for e in exceptions(ev, false) {
@@ -1062,5 +1071,5 @@ async fn markdown(me: Me, State(st): State<AppState>, id: i64) -> R {
             o += "```\n";
         }
     }
-    Ok(([(header::CONTENT_TYPE, "text/markdown; charset=utf-8")], o).into_response())
+    o
 }

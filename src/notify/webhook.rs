@@ -290,7 +290,12 @@ pub async fn send(h: &Hook, i: &Info) -> Result<(), String> {
     let body = serde_json::to_vec(&body(&h.kind, i)).map_err(|e| e.to_string())?;
     let mut req = HOOKS.post(url).header("content-type", "application/json");
     if let Some(s) = &h.secret {
-        req = req.header("X-OpenFault-Signature", signature(s, &body));
+        // signed "{ts}.{body}" so a captured request can't be replayed later with a fresh timestamp.
+        let ts = now().to_string();
+        let signed = [ts.as_bytes(), b".", &body].concat();
+        req = req
+            .header("X-OpenFault-Timestamp", ts)
+            .header("X-OpenFault-Signature", signature(s, &signed));
     }
     let res = req
         .body(body)

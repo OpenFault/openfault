@@ -113,6 +113,29 @@ struct PushReq {
     url: String,
     collapse_id: Option<String>,
     badge: Option<u32>,
+    /// UNNotificationCategory id (the app registers "ISSUE" with actions).
+    category: Option<String>,
+    /// Groups notifications per issue in Notification Center; falls back to collapse_id.
+    thread_id: Option<String>,
+}
+
+/// APNs header-safe: printable ASCII, ≤64.
+fn ascii64(s: &str) -> String {
+    s.chars().filter(char::is_ascii_graphic).take(64).collect()
+}
+
+fn payload(r: &PushReq) -> String {
+    let mut aps = json!({"alert": {"title": trunc(&r.title, 200), "body": trunc(&r.body, 400)}, "sound": "default"});
+    if let Some(t) = r.thread_id.as_ref().or(r.collapse_id.as_ref()) {
+        aps["thread-id"] = ascii64(t).into();
+    }
+    if let Some(c) = &r.category {
+        aps["category"] = ascii64(c).into();
+    }
+    if let Some(b) = r.badge {
+        aps["badge"] = b.into();
+    }
+    json!({"aps": aps, "url": trunc(&r.url, 1000)}).to_string()
 }
 
 fn trunc(s: &str, n: usize) -> String {
@@ -146,18 +169,8 @@ async fn push(State(a): State<Arc<Apns>>, h: HeaderMap, Json(r): Json<PushReq>) 
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))).into_response();
         }
     };
-    let collapse: Option<String> = r
-        .collapse_id
-        .as_deref()
-        .map(|c| c.chars().filter(char::is_ascii_graphic).take(64).collect());
-    let mut aps = json!({"alert": {"title": trunc(&r.title, 200), "body": trunc(&r.body, 400)}, "sound": "default"});
-    if let Some(c) = &collapse {
-        aps["thread-id"] = c.clone().into();
-    }
-    if let Some(b) = r.badge {
-        aps["badge"] = b.into();
-    }
-    let payload = json!({"aps": aps, "url": trunc(&r.url, 1000)}).to_string();
+    let collapse: Option<String> = r.collapse_id.as_deref().map(ascii64);
+    let payload = payload(&r);
     let mut results = Vec::with_capacity(r.tokens.len());
     // ponytail: sequential over one HTTP/2 connection; join_all in chunks if teams get large.
     for tok in r.tokens {
@@ -230,6 +243,28 @@ pub async fn run() {
 mod tests {
     use super::*;
     use ring::signature::{ECDSA_P256_SHA256_FIXED, KeyPair, UnparsedPublicKey};
+
+    #[test]
+    fn payload_has_category_and_thread() {
+        let r: PushReq = serde_json::from_value(json!({
+            "tokens": [], "title": "t", "body": "b", "url": "/issues/7",
+            "collapse_id": "issue-7", "category": "ISSUE", "thread_id": "7", "badge": 2,
+        }))
+        .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&payload(&r)).unwrap();
+        assert_eq!(v["aps"]["category"], "ISSUE");
+        assert_eq!(v["aps"]["thread-id"], "7");
+        assert_eq!(v["aps"]["badge"], 2);
+        assert_eq!(v["url"], "/issues/7");
+        // old servers: no category, thread-id falls back to collapse_id
+        let r: PushReq = serde_json::from_value(json!({
+            "tokens": [], "title": "t", "body": "b", "url": "/", "collapse_id": "issue-7",
+        }))
+        .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&payload(&r)).unwrap();
+        assert!(v["aps"].get("category").is_none());
+        assert_eq!(v["aps"]["thread-id"], "issue-7");
+    }
 
     #[test]
     fn bad_p8_is_an_error_not_a_panic() {

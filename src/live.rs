@@ -2,8 +2,8 @@
 use crate::{AppState, auth::CurrentUser, db::now};
 use axum::{
     Json, Router,
-    extract::{Query, State},
-    http::StatusCode,
+    extract::{FromRequestParts, Query, State},
+    http::{StatusCode, header, request::Parts},
     response::{
         IntoResponse, Response,
         sse::{Event, KeepAlive, Sse},
@@ -73,6 +73,25 @@ struct ScopeQ {
     scope: Option<String>,
 }
 
+/// Session cookie, or `Authorization: Bearer of_…` (iOS app); a token's project_id narrows visibility.
+struct Viewer(CurrentUser, Option<i64>);
+
+impl FromRequestParts<AppState> for Viewer {
+    type Rejection = Response;
+    async fn from_request_parts(p: &mut Parts, st: &AppState) -> Result<Self, Response> {
+        if p.headers.contains_key(header::AUTHORIZATION) {
+            let s = crate::api::scope_from(st, &p.headers)
+                .await
+                .map_err(IntoResponse::into_response)?;
+            return Ok(Viewer(s.user, s.token.project_id));
+        }
+        CurrentUser::from_request_parts(p, st)
+            .await
+            .map(|u| Viewer(u, None))
+            .map_err(IntoResponse::into_response)
+    }
+}
+
 enum Scope {
     All,
     Project(i64),
@@ -80,7 +99,8 @@ enum Scope {
 }
 
 /// Visible project ids for `u`, narrowed by scope. None = scope target missing or not visible (→ 404).
-async fn resolve(st: &AppState, u: &CurrentUser, q: Option<String>) -> Option<(Scope, Vec<i64>)> {
+async fn resolve(st: &AppState, v: &Viewer, q: Option<String>) -> Option<(Scope, Vec<i64>)> {
+    let (u, token_pid) = (&v.0, v.1);
     let q = q.unwrap_or_else(|| "all".into());
     let scope = match q.split_once(':') {
         None if q == "all" => Scope::All,
@@ -111,6 +131,10 @@ async fn resolve(st: &AppState, u: &CurrentUser, q: Option<String>) -> Option<(S
         })
         .await
         .ok()?;
+    let visible: Vec<i64> = visible
+        .into_iter()
+        .filter(|p| token_pid.is_none_or(|t| t == *p))
+        .collect();
     let pids = match scope {
         Scope::All => visible,
         Scope::Project(p) => visible.contains(&p).then(|| vec![p])?,
@@ -122,7 +146,7 @@ async fn resolve(st: &AppState, u: &CurrentUser, q: Option<String>) -> Option<(S
     Some((scope, pids))
 }
 
-async fn live(State(st): State<AppState>, u: CurrentUser, Query(q): Query<ScopeQ>) -> Response {
+async fn live(State(st): State<AppState>, u: Viewer, Query(q): Query<ScopeQ>) -> Response {
     let Some((scope, pids)) = resolve(&st, &u, q.scope).await else {
         return StatusCode::NOT_FOUND.into_response();
     };
@@ -177,7 +201,7 @@ async fn next_tick(rx: &mut Receiver<LiveEvent>, m: &impl Fn(&LiveEvent) -> bool
     Some(v)
 }
 
-async fn summary(State(st): State<AppState>, u: CurrentUser, Query(q): Query<ScopeQ>) -> Response {
+async fn summary(State(st): State<AppState>, u: Viewer, Query(q): Query<ScopeQ>) -> Response {
     // ponytail: issue scope summarises the issue's project; per-issue series isn't needed by TV/dashboard.
     let Some((_, pids)) = resolve(&st, &u, q.scope).await else {
         return StatusCode::NOT_FOUND.into_response();

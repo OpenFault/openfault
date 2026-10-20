@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc aeffba4a31d18390e2b537b6839e590a0d3b2dacd63c2d2373e8c06d8061dd77 # shrinks to extra = Null, data = Null, ctx = Object {"": Array [String("Password"), Null]}

@@ -2,6 +2,7 @@
 pub mod chart;
 mod dashboard;
 mod issues;
+pub use issues::issue_markdown;
 mod releases;
 mod settings;
 mod tv;
@@ -130,7 +131,7 @@ pub fn render(t: impl Template) -> R {
     Ok(Html(t.render()?).into_response())
 }
 /// static asset cache-buster; bump when static/ changes.
-pub const V: &str = "0.1.0-m3.7";
+pub const V: &str = "0.1.0-m3.10";
 
 /// A Phosphor icon from the sprite (`static/icons.svg`); render with `|safe`.
 pub fn icon(name: &str) -> String {
