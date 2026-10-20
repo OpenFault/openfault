@@ -8,7 +8,7 @@
   <label>Organization name <input name="org_name" required></label>
   <label>Your name <input name="name" required></label>
   <label>Email <input name="email" type="email" required autocomplete="email"></label>
-  <label>Password <input name="password" type="password" minlength="10" required autocomplete="new-password"></label>
+  <label>Password <input name="password" type="password" minlength="10" required autocomplete="new-password"><span class="hint">At least 10 characters.</span></label>
   <label>First project <input name="project_name" required></label>
   <label>Platform <select name="platform">{% let current = "" %}{% include "platforms.html" %}</select></label>
   <button>Create</button>

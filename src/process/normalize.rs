@@ -121,22 +121,24 @@ stack.abs_path:**/gems/sentry-*/** -app -group
 stack.function:sentry* -app -group
 ";
 
-struct Rule {
-    field: &'static str,
-    glob: &'static str,
+pub struct Rule {
+    field: String,
+    glob: String,
     app: Option<bool>,
     group: Option<bool>,
 }
 
-static PARSED: LazyLock<Vec<Rule>> = LazyLock::new(|| {
-    RULES
-        .lines()
+static PARSED: LazyLock<Vec<Rule>> = LazyLock::new(|| parse_rules(RULES));
+
+/// Same syntax as [`RULES`]; unparseable lines are skipped.
+pub fn parse_rules(text: &str) -> Vec<Rule> {
+    text.lines()
         .filter_map(|l| {
             let mut parts = l.split_whitespace();
             let (field, glob) = parts.next()?.strip_prefix("stack.")?.split_once(':')?;
             let mut r = Rule {
-                field,
-                glob,
+                field: field.into(),
+                glob: glob.into(),
                 app: None,
                 group: None,
             };
@@ -152,7 +154,7 @@ static PARSED: LazyLock<Vec<Rule>> = LazyLock::new(|| {
             Some(r)
         })
         .collect()
-});
+}
 
 /// `**` matches across `/`, `*` within a segment, `?` one char.
 pub fn glob(p: &[u8], s: &[u8]) -> bool {
@@ -169,11 +171,16 @@ pub fn glob(p: &[u8], s: &[u8]) -> bool {
 
 /// (in_app, contributes_to_grouping). The SDK's `in_app` is the starting point; rules override it.
 pub fn classify(f: &Value) -> (bool, bool) {
+    classify_with(f, &[])
+}
+
+/// Built-in rules, then the project's `extra` rules (later wins).
+pub fn classify_with(f: &Value, extra: &[Rule]) -> (bool, bool) {
     let s = |k| f.get(k).and_then(Value::as_str);
     let mut app = f.get("in_app").and_then(Value::as_bool).unwrap_or(false);
     let mut group = true;
-    for r in PARSED.iter() {
-        let v = match r.field {
+    for r in PARSED.iter().chain(extra) {
+        let v = match r.field.as_str() {
             "abs_path" => s("abs_path").or(s("filename")),
             k => s(k),
         };
@@ -223,6 +230,14 @@ mod tests {
         assert!(glob(b"node:*", b"node:internal"));
         assert!(!glob(b"node:*", b"node:internal/process/task_queues"));
         assert!(glob(b"sentry*", b"sentry_sdk.integrations"));
+    }
+
+    #[test]
+    fn project_rules_after_builtin() {
+        let f = json!({"abs_path": "/app/node_modules/mylib/x.js"});
+        assert!(!classify(&f).0);
+        let extra = parse_rules("stack.abs_path:**/node_modules/mylib/** +app\njunk line");
+        assert!(classify_with(&f, &extra).0);
     }
 
     #[test]

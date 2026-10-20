@@ -1,14 +1,22 @@
 {% extends "app.html" %}
 {% block title %}Settings{% endblock %}
 {% block content %}
-<h1>Settings</h1>
+<div class="head"><h1>Settings</h1></div>
 {% include "settings_nav.html" %}
-<form method="post" action="/settings" class="stack">
-  <label>Organization name <input name="name" value="{{ org_name }}" required></label>
-  <button>Save</button>
-</form>
-<dl class="kv">
-  <dt>Base URL</dt><dd><code>{{ base_url }}</code> <span class="muted">(OPENFAULT_BASE_URL)</span></dd>
-  <dt>Email</dt><dd>{% if smtp %}SMTP configured{% else %}<span class="muted">SMTP not configured (OPENFAULT_SMTP_URL)</span>{% endif %}</dd>
-</dl>
+<div class="form-col">
+<section class="card sec">
+  <h2>Organization</h2>
+  <form method="post" action="/settings" class="stack">
+    <label>Organization name <input name="name" value="{{ org_name }}" required></label>
+    <button>Save</button>
+  </form>
+</section>
+<section class="card sec">
+  <h2>Server</h2>
+  <dl class="kv">
+    <dt>Base URL</dt><dd>{{ base_url }}<div class="hint">Used in DSNs and email links. Set it with the base URL environment variable when running behind a proxy.</div></dd>
+    <dt>Email</dt><dd>{% if smtp %}SMTP configured{% else %}<span class="muted">Not configured</span><div class="hint">Invites and resets show copyable links instead of sending email.</div>{% endif %}</dd>
+  </dl>
+</section>
+</div>
 {% endblock %}

@@ -1,0 +1,23 @@
+{% extends "app.html" %}
+{% block title %}Releases{% endblock %}
+{% block content %}
+<div class="head"><h1>Releases</h1></div>
+{% if rows.is_empty() %}
+<div class="empty">{{ crate::ui::icon("tag")|safe }}<p>No releases yet. Set <code>release</code> in your SDK config and each version shows up here.</p></div>
+{% else %}
+<div class="tbl"><table class="rt">
+<thead><tr><th>Version</th>{% if me.scope.is_none() %}<th>Project</th>{% endif %}<th>First seen</th><th class="num">New issues</th><th class="num">Resolved</th><th class="num">Events</th><th>Commit</th></tr></thead>
+<tbody>
+{% for (slug, r) in rows %}<tr>
+  <td><a class="ver" href="/releases/{{ crate::ui::enc(r.version) }}">{{ crate::ui::icon("tag")|safe }}<b class="mono">{{ r.version }}</b></a>{% if r.is_semver %} <span class="pill xs">semver</span>{% endif %}</td>
+  {% if me.scope.is_none() %}<td><span class="pill">{{ slug }}</span></td>{% endif %}
+  <td><span class="two"><span>{{ crate::ui::abs_date(r.first_seen) }}</span><span class="dim">{{ crate::ui::ago(r.first_seen) }}</span></span></td>
+  <td class="num">{% if r.new_issues > 0 %}<b>{{ r.new_issues }}</b>{% else %}<span class="dim">0</span>{% endif %}</td>
+  <td class="num">{{ r.resolved_issues }}</td>
+  <td class="num">{{ crate::ui::n(r.event_count) }}</td>
+  <td class="mono">{% if let Some(sha) = r.commit_sha %}{% let short = sha.chars().take(7).collect::<String>() %}<span class="sha">{{ crate::ui::icon("git-commit")|safe }}{% if let Some(u) = r.url %}{% if u.starts_with("https://") || u.starts_with("http://") %}<a href="{{ u }}" rel="noopener noreferrer">{{ short }}</a>{% else %}{{ short }}{% endif %}{% else %}{{ short }}{% endif %}</span>{% else %}<span class="dim">&mdash;</span>{% endif %}</td>
+</tr>{% endfor %}
+</tbody>
+</table></div>
+{% endif %}
+{% endblock %}

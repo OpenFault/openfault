@@ -1,0 +1,4 @@
+<details class="frame{% if !f.in_app %} vendor{% endif %}"{% if f.in_app && !f.lines.is_empty() %} open{% endif %}>
+  <summary>{% if f.lines.is_empty() %}<span class="cv"></span>{% else %}{{ crate::ui::icon("caret-right")|safe }}{% endif %}<span class="fn">{{ f.func }}</span><span class="loc">{{ f.loc }}</span>{% if f.in_app %}<span class="pill push">in app</span>{% endif %}</summary>
+  {% if !f.lines.is_empty() %}<pre class="ctx">{% for (ln, t, hit) in f.lines %}<span{% if *hit %} class="hit"{% endif %}><i>{{ ln }}</i>{{ t }}</span>{% endfor %}</pre>{% endif %}
+</details>

@@ -12,6 +12,8 @@ pub struct Db {
     tx: mpsc::Sender<Job>,
     readers: Arc<Mutex<Vec<Connection>>>,
     path: Arc<std::path::PathBuf>,
+    /// deviation: live-update channel lives on Db (not just AppState) so `process::run` and `apply_action`, which only get a Db, can publish.
+    pub live: tokio::sync::broadcast::Sender<crate::live::LiveEvent>,
 }
 
 #[derive(Debug)]
@@ -26,6 +28,7 @@ impl From<rusqlite::Error> for DbError {
         DbError(e.to_string())
     }
 }
+impl std::error::Error for DbError {}
 pub type Result<T> = std::result::Result<T, DbError>;
 
 fn pragmas(c: &Connection, cache_kb: i64) -> rusqlite::Result<()> {
@@ -74,6 +77,7 @@ impl Db {
             tx,
             readers: Arc::new(Mutex::new(readers)),
             path: Arc::new(path.to_owned()),
+            live: tokio::sync::broadcast::channel(1024).0,
         })
     }
 

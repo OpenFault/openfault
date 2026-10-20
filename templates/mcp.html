@@ -1,0 +1,15 @@
+{% extends "app.html" %}
+{% block title %}MCP{% endblock %}
+{% block content %}
+<div class="head"><h1>Settings</h1></div>
+{% include "settings_nav.html" %}
+<div class="form-col">
+<p class="muted" style="max-width:640px">Connect Claude Code, Cursor or any MCP client to OpenFault. Agents can read issues, but only work on ones a human has approved for a fix. Replace <code>&lt;your-token&gt;</code> with an API token: <a href="/settings/tokens"><b>create a token</b></a> (write scope lets agents link fixes and resolve).</p>
+<h3>Claude Code</h3>
+<div class="snip"><pre><code>{{ claude }}</code></pre><button type="button" class="secondary sm" data-copy>{{ crate::ui::icon("copy")|safe }}Copy</button></div>
+<h3>.mcp.json (project-scoped)</h3>
+<div class="snip"><pre><code>{{ mcp_json }}</code></pre><button type="button" class="secondary sm" data-copy>{{ crate::ui::icon("copy")|safe }}Copy</button></div>
+<h3>Cursor (~/.cursor/mcp.json)</h3>
+<div class="snip"><pre><code>{{ cursor }}</code></pre><button type="button" class="secondary sm" data-copy>{{ crate::ui::icon("copy")|safe }}Copy</button></div>
+</div>
+{% endblock %}

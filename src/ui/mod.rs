@@ -1,4 +1,11 @@
-//! Server-rendered UI: setup wizard, auth pages, settings (PLAN §8, §9).
+//! Server-rendered UI (PLAN §8, §9): plumbing, setup/auth pages, settings.
+pub mod chart;
+mod dashboard;
+mod issues;
+mod releases;
+mod settings;
+mod tv;
+
 use crate::{
     AppState,
     auth::{self, CurrentUser},
@@ -8,9 +15,9 @@ use crate::{
 use askama::Template;
 use axum::{
     Extension, Form, Router,
-    extract::{ConnectInfo, DefaultBodyLimit, Path, State},
-    http::{HeaderMap, StatusCode, header},
-    middleware,
+    extract::{ConnectInfo, DefaultBodyLimit, FromRequestParts, Path, Request, State},
+    http::{HeaderMap, StatusCode, header, request::Parts},
+    middleware::{self, Next},
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
 };
@@ -21,7 +28,6 @@ use tower_http::compression::CompressionLayer;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/", get(home))
         .route("/setup", get(setup_page).post(setup))
         .route("/projects/{slug}/setup-sdk", get(setup_sdk))
         .route("/login", get(login_page).post(login))
@@ -54,9 +60,20 @@ pub fn routes() -> Router<AppState> {
         .route("/settings/tokens/{id}/revoke", post(revoke_token))
         .route("/settings/account", get(account).post(save_account))
         .route("/settings/account/password", post(change_password))
+        .route(
+            "/settings/members/invites/{hash}/revoke",
+            post(revoke_invite),
+        )
         .route("/static/{*path}", get(asset))
+        .merge(dashboard::routes())
+        .merge(issues::routes())
+        .merge(releases::routes())
+        .merge(settings::routes())
+        .merge(tv::routes())
+        .fallback(async || E(StatusCode::NOT_FOUND, String::new()))
         .layer(DefaultBodyLimit::max(64 * 1024)) // overrides the ingest-wide disable
         .layer(middleware::from_fn(auth::csrf))
+        .layer(middleware::from_fn(clear_flash))
         .layer(CompressionLayer::new())
 }
 
@@ -73,9 +90,34 @@ impl IntoResponse for E {
         if self.0.is_server_error() {
             tracing::error!("ui: {}", self.1);
         }
-        (self.0, self.1).into_response()
+        let (title, body) = match self.0 {
+            StatusCode::FORBIDDEN => (
+                "No access",
+                "You don't have permission to view this page. Ask an admin if you need it.",
+            ),
+            StatusCode::NOT_FOUND => ("Not found", "This page doesn't exist, or you can't see it."),
+            s if s.is_server_error() => (
+                "Something broke",
+                "The server hit an error. It has been logged.",
+            ),
+            _ => ("Request rejected", self.1.as_str()),
+        };
+        let page = ErrorPage {
+            code: self.0.as_u16(),
+            title,
+            body,
+        };
+        (self.0, Html(page.render().unwrap_or_default())).into_response()
     }
 }
+#[derive(Template)]
+#[template(path = "error.html")]
+struct ErrorPage<'a> {
+    code: u16,
+    title: &'a str,
+    body: &'a str,
+}
+
 fn forbidden() -> E {
     E(StatusCode::FORBIDDEN, "forbidden".into())
 }
@@ -87,6 +129,200 @@ type R = Result<Response, E>;
 pub fn render(t: impl Template) -> R {
     Ok(Html(t.render()?).into_response())
 }
+/// static asset cache-buster; bump when static/ changes.
+pub const V: &str = "0.1.0-m3.4";
+
+/// A Phosphor icon from the sprite (`static/icons.svg`); render with `|safe`.
+pub fn icon(name: &str) -> String {
+    format!(
+        "<svg class=\"i\" aria-hidden=\"true\"><use href=\"/static/icons.svg?v={V}#i-{name}\"/></svg>"
+    )
+}
+const FLASH: &str = "of_flash";
+
+/// Redirect + a one-shot toast message (cookie read by `Me`, cleared by `clear_flash`).
+pub fn flash(path: &str, msg: &str) -> R {
+    let c = format!(
+        "{FLASH}={}; Path=/; Max-Age=60; SameSite=Lax",
+        base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, msg)
+    );
+    with_cookie(path, c)
+}
+
+async fn clear_flash(req: Request, next: Next) -> Response {
+    let had = auth::cookie(req.headers(), FLASH).is_some_and(|v| !v.is_empty());
+    let mut res = next.run(req).await;
+    if had && !res.status().is_redirection() {
+        res.headers_mut().append(
+            header::SET_COOKIE,
+            header::HeaderValue::from_static("of_flash=; Path=/; Max-Age=0"),
+        );
+    }
+    res
+}
+
+pub struct SavedView {
+    pub id: i64,
+    pub name: String,
+    pub href: String,
+}
+
+/// The signed-in user plus what every app page's chrome needs (switcher, sidebar, toast).
+pub struct Me {
+    pub user: CurrentUser,
+    pub projects: Vec<Project>,
+    pub views: Vec<SavedView>,
+    pub flash: Option<String>,
+    pub path: String,
+    /// path + query, what live fragments re-fetch
+    pub url: String,
+    /// project the page is scoped to (/projects/{slug}/...)
+    pub scope: Option<Project>,
+}
+
+impl std::ops::Deref for Me {
+    type Target = CurrentUser;
+    fn deref(&self) -> &CurrentUser {
+        &self.user
+    }
+}
+
+impl Me {
+    pub fn at(&self, seg: &str) -> bool {
+        self.path.split('/').any(|s| s == seg)
+    }
+    pub fn initials(&self) -> String {
+        initials(&self.user.name, &self.user.email)
+    }
+    pub fn base(&self, page: &str) -> String {
+        match &self.scope {
+            Some(p) => format!("/projects/{}/{page}", p.slug),
+            None => format!("/{page}"),
+        }
+    }
+    pub fn project_name(&self, id: &i64) -> &str {
+        self.projects
+            .iter()
+            .find(|p| p.id == *id)
+            .map_or("", |p| p.name.as_str())
+    }
+}
+
+pub fn initials(name: &str, email: &str) -> String {
+    let src = if name.trim().is_empty() { email } else { name };
+    src.split_whitespace()
+        .take(2)
+        .filter_map(|w| w.chars().next())
+        .flat_map(char::to_uppercase)
+        .collect()
+}
+
+impl FromRequestParts<AppState> for Me {
+    type Rejection = axum::response::Redirect;
+    async fn from_request_parts(p: &mut Parts, st: &AppState) -> Result<Self, Self::Rejection> {
+        let user = CurrentUser::from_request_parts(p, st).await?;
+        let projects = visible_projects(st, &user).await.unwrap_or_default();
+        let uid = user.id;
+        let views = st
+            .db
+            .read(move |c| {
+                c.prepare("SELECT id, name, query, sort FROM saved_views WHERE user_id = ?1 ORDER BY name")?
+                    .query_map([uid], |r| {
+                        let (q, s): (String, String) = (r.get(2)?, r.get(3)?);
+                        Ok(SavedView {
+                            id: r.get(0)?,
+                            name: r.get(1)?,
+                            href: format!("/issues?q={}&sort={}", enc(&q), enc(&s)),
+                        })
+                    })?
+                    .collect()
+            })
+            .await
+            .unwrap_or_default();
+        let flash = auth::cookie(&p.headers, FLASH)
+            .and_then(|v| {
+                base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, v).ok()
+            })
+            .and_then(|b| String::from_utf8(b).ok());
+        Ok(Me {
+            user,
+            projects,
+            views,
+            flash,
+            path: p.uri.path().to_string(),
+            url: p
+                .uri
+                .path_and_query()
+                .map_or("/", |x| x.as_str())
+                .to_string(),
+            scope: None,
+        })
+    }
+}
+
+/// Percent-encode for a query value.
+pub fn enc(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+/// "3m ago" style.
+pub fn ago(t: &i64) -> String {
+    let d = (now() - *t).max(0);
+    match d {
+        0..60 => "just now".into(),
+        60..3600 => format!("{}m ago", d / 60),
+        3600..86400 => format!("{}h ago", d / 3600),
+        86400..2_592_000 => format!("{}d ago", d / 86400),
+        _ => jiff::Timestamp::from_second(*t)
+            .map(|t| t.strftime("%b %d, %Y").to_string())
+            .unwrap_or_default(),
+    }
+}
+
+/// Relative time with the absolute one on hover; render with `|safe`.
+pub fn t(t: &i64) -> String {
+    let iso = jiff::Timestamp::from_second(*t)
+        .map(|t| t.to_string())
+        .unwrap_or_default();
+    format!(
+        "<time datetime=\"{iso}\" title=\"{}\">{}</time>",
+        abs(t),
+        ago(t)
+    )
+}
+
+/// "Oct 20, 2026"
+pub fn abs_date(t: &i64) -> String {
+    jiff::Timestamp::from_second(*t)
+        .map(|t| t.strftime("%b %d, %Y").to_string())
+        .unwrap_or_default()
+}
+
+pub fn abs(t: &i64) -> String {
+    jiff::Timestamp::from_second(*t)
+        .map(|t| t.strftime("%Y-%m-%d %H:%M:%S UTC").to_string())
+        .unwrap_or_default()
+}
+
+pub fn n(v: &i64) -> String {
+    let s = v.to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i).is_multiple_of(3) && c != '-' {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
 fn to(path: &str) -> R {
     Ok(Redirect::to(path).into_response())
 }
@@ -152,13 +388,15 @@ async fn asset(Path(p): Path<String>) -> Response {
         Some("css") => "text/css; charset=utf-8",
         Some("js") => "text/javascript; charset=utf-8",
         Some("svg") => "image/svg+xml",
+        Some("woff2") => "font/woff2",
+        Some("txt") => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
     };
-    // ponytail: 1h cache, no fingerprinted names; add a ?v=hash when assets change often.
+    // templates reference assets as ?v={crate version}; fonts never change.
     (
         [
             (header::CONTENT_TYPE, ct),
-            (header::CACHE_CONTROL, "public, max-age=3600"),
+            (header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
         ],
         f.data,
     )
@@ -175,10 +413,11 @@ pub struct Project {
     pub platform: String,
     pub retention_days: i64,
     pub store_ip: bool,
+    pub inapp_rules: String,
 }
 
 const PROJECT_COLS: &str = "id, slug, name, coalesce(platform, ''), retention_days,
-    coalesce(json_extract(settings_json, '$.store_ip'), 0)";
+    coalesce(json_extract(settings_json, '$.store_ip'), 0), coalesce(json_extract(settings_json, '$.inapp_rules'), '')";
 fn project_row(r: &rusqlite::Row) -> rusqlite::Result<Project> {
     Ok(Project {
         id: r.get(0)?,
@@ -187,6 +426,7 @@ fn project_row(r: &rusqlite::Row) -> rusqlite::Result<Project> {
         platform: r.get(3)?,
         retention_days: r.get(4)?,
         store_ip: r.get::<_, i64>(5)? != 0,
+        inapp_rules: r.get(6)?,
     })
 }
 pub(crate) const VISIBLE: &str =
@@ -332,7 +572,7 @@ async fn setup(State(st): State<AppState>, Form(f): Form<SetupForm>) -> R {
 #[derive(Template)]
 #[template(path = "setup_sdk.html")]
 struct SetupSdk {
-    me: CurrentUser,
+    me: Me,
     project: Project,
     dsn: String,
 }
@@ -353,7 +593,7 @@ async fn first_key(st: &AppState, pid: i64) -> Result<String, E> {
 }
 
 async fn setup_sdk(
-    me: CurrentUser,
+    me: Me,
     State(st): State<AppState>,
     h: HeaderMap,
     Path(slug): Path<String>,
@@ -371,13 +611,17 @@ async fn setup_sdk(
 #[template(path = "login.html")]
 struct Login {
     error: Option<String>,
+    email: String,
 }
 
 async fn login_page(State(st): State<AppState>) -> R {
     if !users_exist(&st).await? {
         return to("/setup");
     }
-    render(Login { error: None })
+    render(Login {
+        error: None,
+        email: String::new(),
+    })
 }
 
 #[derive(Deserialize)]
@@ -422,10 +666,12 @@ async fn login(
     if limited(&st, &h, peer) {
         let page = Login {
             error: Some(TOO_MANY.into()),
+            email: f.email,
         };
         return Ok((StatusCode::TOO_MANY_REQUESTS, render(page)?).into_response());
     }
     let email = f.email.trim().to_lowercase();
+    let typed = f.email.clone();
     let row: Option<(i64, String)> = st
         .db
         .read(move |c| {
@@ -447,6 +693,7 @@ async fn login(
     }
     render(Login {
         error: Some("Wrong email or password.".into()),
+        email: typed,
     })
 }
 
@@ -704,27 +951,15 @@ async fn accept_invite(
 // ---------- app pages ----------
 
 #[derive(Template)]
-#[template(path = "home.html")]
-struct Home {
-    me: CurrentUser,
-    projects: Vec<Project>,
-}
-
-async fn home(me: CurrentUser, State(st): State<AppState>) -> R {
-    let projects = visible_projects(&st, &me).await?;
-    render(Home { me, projects })
-}
-
-#[derive(Template)]
 #[template(path = "settings.html")]
 struct Settings {
-    me: CurrentUser,
+    me: Me,
     org_name: String,
     base_url: String,
     smtp: bool,
 }
 
-async fn settings(me: CurrentUser, State(st): State<AppState>, h: HeaderMap) -> R {
+async fn settings(me: Me, State(st): State<AppState>, h: HeaderMap) -> R {
     admin(&me)?;
     let org_name = st
         .db
@@ -747,12 +982,12 @@ struct NameForm {
     name: String,
 }
 
-async fn save_org(me: CurrentUser, State(st): State<AppState>, Form(f): Form<NameForm>) -> R {
+async fn save_org(me: Me, State(st): State<AppState>, Form(f): Form<NameForm>) -> R {
     admin(&me)?;
     st.db
         .write(move |c| c.execute("UPDATE orgs SET name = ?1 WHERE id = 1", [f.name.trim()]))
         .await?;
-    to("/settings")
+    flash("/settings", "Organization saved")
 }
 
 pub struct Member {
@@ -762,18 +997,46 @@ pub struct Member {
     pub role: String,
 }
 
+pub struct PendingInvite {
+    pub hash: String,
+    pub email: String,
+    pub role: String,
+    pub expires_at: i64,
+}
+
 #[derive(Template)]
 #[template(path = "members.html")]
 struct Members {
-    me: CurrentUser,
+    me: Me,
     users: Vec<Member>,
     projects: Vec<Project>,
+    invites: Vec<PendingInvite>,
     invite_link: Option<String>,
+    invited: String,
     smtp: bool,
 }
 
-async fn members_page(st: &AppState, me: CurrentUser, invite_link: Option<String>) -> R {
+async fn members_page(st: &AppState, me: Me, invite: Option<(String, String)>) -> R {
     admin(&me)?;
+    let invites = st
+        .db
+        .read(|c| {
+            c.prepare("SELECT token_hash, email, role, expires_at FROM invites WHERE accepted_at IS NULL AND expires_at > ?1 ORDER BY expires_at DESC")?
+                .query_map([now()], |r| {
+                    Ok(PendingInvite {
+                        hash: r.get(0)?,
+                        email: r.get(1)?,
+                        role: r.get(2)?,
+                        expires_at: r.get(3)?,
+                    })
+                })?
+                .collect()
+        })
+        .await?;
+    let (invited, invite_link) = match invite {
+        Some((e, l)) => (e, Some(l)),
+        None => (String::new(), None),
+    };
     let users = st
         .db
         .read(|c| {
@@ -794,18 +1057,20 @@ async fn members_page(st: &AppState, me: CurrentUser, invite_link: Option<String
         me,
         users,
         projects,
+        invites,
         invite_link,
+        invited,
         smtp: mail::configured(),
     })
 }
 
-async fn members(me: CurrentUser, State(st): State<AppState>) -> R {
+async fn members(me: Me, State(st): State<AppState>) -> R {
     members_page(&st, me, None).await
 }
 
 /// Form fields: email, role, p (repeated project id).
 async fn invite(
-    me: CurrentUser,
+    me: Me,
     State(st): State<AppState>,
     h: HeaderMap,
     Form(f): Form<Vec<(String, String)>>,
@@ -850,7 +1115,20 @@ async fn invite(
         );
         mail::send_mail(&st, &email, "You're invited to OpenFault", &text, &html).await;
     }
-    members_page(&st, me, Some(link)).await
+    members_page(&st, me, Some((email, link))).await
+}
+
+async fn revoke_invite(me: Me, State(st): State<AppState>, Path(hash): Path<String>) -> R {
+    admin(&me)?;
+    st.db
+        .write(move |c| {
+            c.execute(
+                "DELETE FROM invites WHERE token_hash = ?1 AND accepted_at IS NULL",
+                [hash],
+            )
+        })
+        .await?;
+    flash("/settings/members", "Invite revoked")
 }
 
 #[derive(Deserialize)]
@@ -859,7 +1137,7 @@ struct RoleForm {
 }
 
 async fn set_role(
-    me: CurrentUser,
+    me: Me,
     State(st): State<AppState>,
     Path(id): Path<i64>,
     Form(f): Form<RoleForm>,
@@ -874,26 +1152,26 @@ async fn set_role(
             )
         })
         .await?;
-    to("/settings/members")
+    flash("/settings/members", "Role updated")
 }
 
-async fn remove_member(me: CurrentUser, State(st): State<AppState>, Path(id): Path<i64>) -> R {
+async fn remove_member(me: Me, State(st): State<AppState>, Path(id): Path<i64>) -> R {
     admin(&me)?;
     st.db
         .write(move |c| c.execute("DELETE FROM users WHERE id = ?1 AND role != 'owner'", [id]))
         .await?;
-    to("/settings/members")
+    flash("/settings/members", "Member removed")
 }
 
 #[derive(Template)]
 #[template(path = "projects.html")]
 struct Projects {
-    me: CurrentUser,
+    me: Me,
     projects: Vec<Project>,
     error: Option<String>,
 }
 
-async fn projects(me: CurrentUser, State(st): State<AppState>) -> R {
+async fn projects(me: Me, State(st): State<AppState>) -> R {
     let projects = visible_projects(&st, &me).await?;
     render(Projects {
         me,
@@ -908,11 +1186,7 @@ struct ProjectForm {
     platform: String,
 }
 
-async fn create_project(
-    me: CurrentUser,
-    State(st): State<AppState>,
-    Form(f): Form<ProjectForm>,
-) -> R {
+async fn create_project(me: Me, State(st): State<AppState>, Form(f): Form<ProjectForm>) -> R {
     admin(&me)?;
     let slug = slugify(&f.name);
     let s2 = slug.clone();
@@ -938,7 +1212,7 @@ async fn create_project(
             error,
         });
     }
-    to(&format!("/settings/projects/{slug}"))
+    flash(&format!("/settings/projects/{slug}"), "Project created")
 }
 
 pub struct Key {
@@ -946,35 +1220,36 @@ pub struct Key {
     pub label: String,
     pub active: bool,
     pub dsn: String,
+    pub public_key_short: String,
+    pub created_at: i64,
 }
 
 #[derive(Template)]
 #[template(path = "project.html")]
 struct ProjectPage {
-    me: CurrentUser,
+    me: Me,
     project: Project,
     keys: Vec<Key>,
     dsn: String,
+    quotas: Vec<(String, String)>,
 }
 
-async fn project(
-    me: CurrentUser,
-    State(st): State<AppState>,
-    h: HeaderMap,
-    Path(slug): Path<String>,
-) -> R {
+async fn project(me: Me, State(st): State<AppState>, h: HeaderMap, Path(slug): Path<String>) -> R {
     let project = project_for(&st, &me, slug).await?;
     let (base, pid) = (base_url(&h), project.id);
     let keys: Vec<Key> = st
         .db
         .read(move |c| {
-            c.prepare("SELECT id, label, active, public_key FROM dsn_keys WHERE project_id = ?1 ORDER BY active DESC, id")?
+            c.prepare("SELECT id, label, active, public_key, created_at FROM dsn_keys WHERE project_id = ?1 ORDER BY active DESC, id DESC")?
                 .query_map([pid], |r| {
+                    let key: String = r.get(3)?;
                     Ok(Key {
                         id: r.get(0)?,
                         label: r.get(1)?,
                         active: r.get(2)?,
-                        dsn: dsn(&base, &r.get::<_, String>(3)?, pid),
+                        dsn: dsn(&base, &key, pid),
+                        public_key_short: format!("{}…", &key[..key.len().min(12)]),
+                        created_at: r.get(4)?,
                     })
                 })?
                 .collect()
@@ -985,11 +1260,23 @@ async fn project(
         .find(|k| k.active)
         .map(|k| k.dsn.clone())
         .unwrap_or_default();
+    let quotas = crate::ingest::handler::QUOTAS
+        .iter()
+        .map(|&(secs, max)| {
+            let w = if secs % 3600 == 0 {
+                format!("{} h", secs / 3600)
+            } else {
+                format!("{} min", secs / 60)
+            };
+            (w, n(&(max as i64)))
+        })
+        .collect();
     render(ProjectPage {
         me,
         project,
         keys,
         dsn,
+        quotas,
     })
 }
 
@@ -999,10 +1286,12 @@ struct ProjectSettingsForm {
     platform: String,
     retention_days: i64,
     store_ip: Option<String>,
+    #[serde(default)]
+    inapp_rules: String,
 }
 
 async fn save_project(
-    me: CurrentUser,
+    me: Me,
     State(st): State<AppState>,
     Path(slug): Path<String>,
     Form(f): Form<ProjectSettingsForm>,
@@ -1013,7 +1302,7 @@ async fn save_project(
         .write(move |c| {
             c.execute(
                 "UPDATE projects SET name = ?1, platform = ?2, retention_days = ?3,
-                 settings_json = json_set(settings_json, '$.store_ip', json(?4)) WHERE id = ?5",
+                 settings_json = json_set(settings_json, '$.store_ip', json(?4), '$.inapp_rules', ?6) WHERE id = ?5",
                 params![
                     f.name.trim(),
                     platform(&f.platform),
@@ -1023,12 +1312,13 @@ async fn save_project(
                     } else {
                         "false"
                     },
-                    p.id
+                    p.id,
+                    f.inapp_rules.trim()
                 ],
             )
         })
         .await?;
-    to(&format!("/settings/projects/{slug}"))
+    flash(&format!("/settings/projects/{slug}"), "Project saved")
 }
 
 #[derive(Deserialize)]
@@ -1037,7 +1327,7 @@ struct LabelForm {
 }
 
 async fn create_key(
-    me: CurrentUser,
+    me: Me,
     State(st): State<AppState>,
     Path(slug): Path<String>,
     Form(f): Form<LabelForm>,
@@ -1052,11 +1342,11 @@ async fn create_key(
             )
         })
         .await?;
-    to(&format!("/settings/projects/{slug}"))
+    flash(&format!("/settings/projects/{slug}"), "Key created")
 }
 
 async fn revoke_key(
-    me: CurrentUser,
+    me: Me,
     State(st): State<AppState>,
     Path((slug, id)): Path<(String, i64)>,
 ) -> R {
@@ -1070,7 +1360,7 @@ async fn revoke_key(
             )
         })
         .await?;
-    to(&format!("/settings/projects/{slug}"))
+    flash(&format!("/settings/projects/{slug}"), "Key revoked")
 }
 
 pub struct TokenRow {
@@ -1084,13 +1374,13 @@ pub struct TokenRow {
 #[derive(Template)]
 #[template(path = "tokens.html")]
 struct Tokens {
-    me: CurrentUser,
+    me: Me,
     tokens: Vec<TokenRow>,
     projects: Vec<Project>,
     new_token: Option<String>,
 }
 
-async fn tokens_page(st: &AppState, me: CurrentUser, new_token: Option<String>) -> R {
+async fn tokens_page(st: &AppState, me: Me, new_token: Option<String>) -> R {
     let uid = me.id;
     let tokens = st
         .db
@@ -1124,7 +1414,7 @@ async fn tokens_page(st: &AppState, me: CurrentUser, new_token: Option<String>) 
     })
 }
 
-async fn tokens(me: CurrentUser, State(st): State<AppState>) -> R {
+async fn tokens(me: Me, State(st): State<AppState>) -> R {
     tokens_page(&st, me, None).await
 }
 
@@ -1135,7 +1425,7 @@ struct TokenForm {
     project: String,
 }
 
-async fn create_token(me: CurrentUser, State(st): State<AppState>, Form(f): Form<TokenForm>) -> R {
+async fn create_token(me: Me, State(st): State<AppState>, Form(f): Form<TokenForm>) -> R {
     let scope = if f.scope == "write" { "write" } else { "read" };
     let pid = match f.project.as_str() {
         "" => None,
@@ -1164,7 +1454,7 @@ async fn create_token(me: CurrentUser, State(st): State<AppState>, Form(f): Form
     tokens_page(&st, me, Some(tok)).await
 }
 
-async fn revoke_token(me: CurrentUser, State(st): State<AppState>, Path(id): Path<i64>) -> R {
+async fn revoke_token(me: Me, State(st): State<AppState>, Path(id): Path<i64>) -> R {
     let uid = me.id;
     st.db
         .write(move |c| {
@@ -1174,21 +1464,21 @@ async fn revoke_token(me: CurrentUser, State(st): State<AppState>, Path(id): Pat
             )
         })
         .await?;
-    to("/settings/tokens")
+    flash("/settings/tokens", "Token revoked")
 }
 
 #[derive(Template)]
 #[template(path = "account.html")]
 struct Account {
-    me: CurrentUser,
+    me: Me,
     msg: Option<String>,
 }
 
-async fn account(me: CurrentUser) -> R {
+async fn account(me: Me) -> R {
     render(Account { me, msg: None })
 }
 
-async fn save_account(me: CurrentUser, State(st): State<AppState>, Form(f): Form<NameForm>) -> R {
+async fn save_account(me: Me, State(st): State<AppState>, Form(f): Form<NameForm>) -> R {
     let uid = me.id;
     st.db
         .write(move |c| {
@@ -1198,7 +1488,7 @@ async fn save_account(me: CurrentUser, State(st): State<AppState>, Form(f): Form
             )
         })
         .await?;
-    to("/settings/account")
+    flash("/settings/account", "Profile saved")
 }
 
 #[derive(Deserialize)]
@@ -1208,7 +1498,7 @@ struct ChangePasswordForm {
 }
 
 async fn change_password(
-    me: CurrentUser,
+    me: Me,
     State(st): State<AppState>,
     h: HeaderMap,
     Form(f): Form<ChangePasswordForm>,

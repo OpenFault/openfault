@@ -52,12 +52,18 @@ CREATE TABLE IF NOT EXISTS events (
   user_hash TEXT, sampled INTEGER NOT NULL DEFAULT 0, payload BLOB NOT NULL);
 CREATE INDEX IF NOT EXISTS events_project_received ON events(project_id, received_at);
 CREATE INDEX IF NOT EXISTS events_issue_received ON events(issue_id, received_at);
+-- every processed event_id (stored or sampled out), for dedupe of retries; purged after 7 days.
+CREATE TABLE IF NOT EXISTS seen_events (id TEXT PRIMARY KEY, received_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS seen_events_received ON seen_events(received_at);
 CREATE TABLE IF NOT EXISTS issue_hourly (
   issue_id INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE, hour_ts INTEGER NOT NULL,
   count INTEGER NOT NULL DEFAULT 0, user_count_est INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (issue_id, hour_ts));
 CREATE TABLE IF NOT EXISTS project_hourly (
   project_id INTEGER NOT NULL, hour_ts INTEGER NOT NULL, received INTEGER NOT NULL DEFAULT 0,
   stored INTEGER NOT NULL DEFAULT 0, dropped INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (project_id, hour_ts));
+-- received events per 5-minute bucket for /live/summary; purged after 24h.
+CREATE TABLE IF NOT EXISTS project_5min (
+  project_id INTEGER NOT NULL, bucket_ts INTEGER NOT NULL, count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (project_id, bucket_ts));
 CREATE TABLE IF NOT EXISTS issue_users (
   issue_id INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE, user_hash TEXT NOT NULL, last_seen INTEGER NOT NULL,
   PRIMARY KEY (issue_id, user_hash));
@@ -76,6 +82,7 @@ CREATE TABLE IF NOT EXISTS chunks (sha1 TEXT PRIMARY KEY, data BLOB NOT NULL, cr
 CREATE TABLE IF NOT EXISTS devices (
   id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, platform TEXT NOT NULL,
   push_token TEXT NOT NULL, created_at INTEGER NOT NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS devices_user_token ON devices(user_id, push_token);
 CREATE TABLE IF NOT EXISTS notif_prefs (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, project_id INTEGER, kind TEXT NOT NULL,
   email INTEGER NOT NULL DEFAULT 1, push INTEGER NOT NULL DEFAULT 1);
@@ -85,5 +92,9 @@ CREATE TABLE IF NOT EXISTS webhooks (
 CREATE TABLE IF NOT EXISTS inbox (
   id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, received_at INTEGER NOT NULL, body BLOB NOT NULL,
   content_encoding TEXT NOT NULL DEFAULT 'zstd');
+
+CREATE TABLE IF NOT EXISTS saved_views (
+  id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, name TEXT NOT NULL,
+  query TEXT NOT NULL, sort TEXT NOT NULL DEFAULT 'last_seen', created_at INTEGER NOT NULL);
 
 INSERT INTO schema_version (version) SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM schema_version);

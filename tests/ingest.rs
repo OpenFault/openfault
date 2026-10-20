@@ -167,7 +167,7 @@ async fn fixtures_land_as_one_issue_per_bug() {
             "SELECT event_count FROM issues WHERE title LIKE 'TypeError%'"
         )
         .await,
-        2
+        1 // gzip copy has the same event_id: deduped
     );
     assert_eq!(
         count(
@@ -180,7 +180,7 @@ async fn fixtures_land_as_one_issue_per_bug() {
     assert_eq!(count(&db, "SELECT count(*) FROM releases").await, 2);
     assert_eq!(
         count(&db, "SELECT sum(received) FROM project_hourly").await,
-        8
+        7
     );
 
     let (title, culprit, payload): (String, String, Vec<u8>) = db
@@ -301,4 +301,26 @@ async fn resolved_issue_regresses() {
         .await,
         1
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn duplicate_event_counts_once() {
+    let (app, db, _dir) = setup().await;
+    let mut rx = db.live.subscribe();
+    for _ in 0..2 {
+        let env = fixture("message.envelope");
+        assert_eq!(
+            post(&app, "/api/1/envelope/", env, &[]).await.0,
+            StatusCode::OK
+        );
+        wait_processed(&db).await;
+    }
+    assert_eq!(count(&db, "SELECT sum(event_count) FROM issues").await, 1);
+    assert_eq!(
+        count(&db, "SELECT sum(received) FROM project_hourly").await,
+        1
+    );
+    assert_eq!(count(&db, "SELECT sum(count) FROM issue_hourly").await, 1);
+    assert!(rx.try_recv().is_ok());
+    assert!(rx.try_recv().is_err(), "exactly one live tick");
 }

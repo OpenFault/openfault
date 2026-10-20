@@ -1,0 +1,79 @@
+{% extends "app.html" %}
+{% block title %}Issues{% endblock %}
+{% block content %}
+<div class="head">
+  <h1>Issues</h1>
+  <details class="dd">
+    <summary class="btn secondary sm">{{ crate::ui::icon("plus")|safe }}Save view</summary>
+    <div class="pop r"><form method="post" action="/views" class="stack">
+      <label>Name <input name="name" required maxlength="60" placeholder="My open errors"></label>
+      <input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="sort" value="{{ sort }}">
+      <button class="sm">Save view</button>
+    </form></div>
+  </details>
+</div>
+<form class="qbar" action="{{ base }}" role="search">
+  <div class="qin">{{ crate::ui::icon("magnifying-glass")|safe }}<input name="q" id="q" value="{{ q }}" placeholder='is:unresolved level:error release:1.2 env:production "timeout"' aria-label="Filter issues" autocomplete="off" spellcheck="false"></div>
+  <label class="sel-wrap" title="Sort">{{ crate::ui::icon("arrows-down-up")|safe }}<select name="sort" aria-label="Sort" data-autosubmit>{% for (v, l) in [("last_seen", "Last seen"), ("first_seen", "First seen"), ("events", "Events"), ("users", "Users")] %}<option value="{{ v }}"{% if *v == sort %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+  <details class="dd">
+    <summary class="btn secondary icon" aria-label="Search syntax" title="Search syntax">{{ crate::ui::icon("info")|safe }}</summary>
+    <div class="pop r keys"><div class="meta">Search keys</div>
+      <dl class="syn"><dt>is:</dt><dd>unresolved, resolved, muted</dd><dt>level:</dt><dd>error, warning, info</dd><dt>release:</dt><dd>1.2.0</dd><dt>env:</dt><dd>production</dd><dt>assignee:</dt><dd>me, or a user id</dd><dt>approved:</dt><dd>yes, no</dd><dt>"text"</dt><dd>title or culprit</dd></dl>
+    </div>
+  </details>
+</form>
+<div class="toolbar">
+  <nav class="seg" aria-label="Status">{% for (l, href, on) in tabs %}<a href="{{ href }}"{% if *on %} class="on" aria-current="true"{% endif %}>{{ l }}{% if *on %}<i class="ind" aria-hidden="true"></i>{% endif %}</a>{% endfor %}</nav>
+  {% for c in chips %}
+  <details class="dd">
+    <summary class="btn {% if c.current.is_some() %}secondary{% else %}ghost{% endif %} sm">{{ c.label }}{% if let Some(v) = c.current %}: <span class="mono">{{ v }}</span>{% endif %} {{ crate::ui::icon("caret-down")|safe }}</summary>
+    <div class="pop">
+      {% if c.opts.is_empty() %}<div class="meta">Nothing seen yet</div>{% endif %}
+      {% for (l, href) in c.opts %}<a href="{{ href }}">{{ l }}</a>{% endfor %}
+      {% if c.current.is_some() %}<hr><a href="{{ c.clear }}">{{ crate::ui::icon("x")|safe }}Clear</a>{% endif %}
+    </div>
+  </details>
+  {% endfor %}
+  <span class="dim sm hint-keys">Press <kbd>?</kbd> for shortcuts</span>
+</div>
+<div id="rows" hx-get="{{ me.url }}" hx-select="#rows" hx-trigger="sse:tick[!document.querySelector('.sel:checked, .chunk .chunk')] throttle:1s" hx-swap="outerHTML">
+{% if rows.is_empty() %}
+  {% if filtered %}<div class="empty">{{ crate::ui::icon("funnel")|safe }}<p>No issues match these filters.</p><a class="btn secondary sm" href="{{ base }}?q=is%3Aunresolved">{{ crate::ui::icon("x")|safe }}Clear filters</a></div>
+  {% else if me.projects.is_empty() %}<div class="empty">{{ crate::ui::icon("squares-four")|safe }}<p>You're not in any project yet. Ask an admin to add you.</p></div>
+  {% else if status == "resolved" %}<div class="empty">{{ crate::ui::icon("check-circle")|safe }}<p>Nothing resolved yet. Resolved issues land here.</p></div>
+  {% else if status == "muted" %}<div class="empty">{{ crate::ui::icon("bell-slash")|safe }}<p>Nothing muted. Muted issues stay quiet here.</p></div>
+  {% else %}<div class="empty">{{ crate::ui::icon("check-circle")|safe }}<p>All clear. When something breaks, it shows up here live.</p><a class="btn secondary sm" href="/projects/{% if let Some(p) = me.scope %}{{ p.slug }}{% else %}{{ me.projects[0].slug }}{% endif %}/setup-sdk">SDK setup</a></div>{% endif %}
+{% else %}
+<form method="post" action="/issues/bulk" class="issues">
+  <input type="hidden" name="next" value="{{ next }}">
+  <div class="list" role="list">
+    <div class="row lh"><span></span><span>Issue</span><span>24h</span><span class="num">Events</span><span class="num">Users</span><span>Last · first seen</span><span></span></div>
+    <div class="chunk">
+    {% for x in rows %}{% let r = x.r %}
+    <div class="row{% if r.status != "unresolved" %} off{% endif %}" role="listitem" tabindex="0" data-id="{{ r.id }}" data-k="{{ r.id }}">
+      <input type="checkbox" class="sel" name="id" value="{{ r.id }}" aria-label="Select issue">
+      <div class="ti">
+        <a class="t" href="/issues/{{ r.id }}"><span class="dot {{ r.level }}" title="{{ r.level }}"></span><span>{{ r.title }}</span></a>
+        <div class="sub">{% if me.scope.is_none() %}<span class="pill">{{ r.project_slug }}</span>{% endif %}{% if r.status != "unresolved" %}<span class="pill solid">{% if r.status == "resolved" %}{{ crate::ui::icon("check")|safe }}{% else %}{{ crate::ui::icon("bell-slash")|safe }}{% endif %}{{ r.status }}</span>{% endif %}{% if r.approved_at.is_some() %}<span class="pill">approved</span>{% endif %}<code>{{ r.culprit }}</code></div>
+      </div>
+      <span class="x spk">{{ x.bars|safe }}</span>
+      <span class="num x" id="ev{{ r.id }}" data-n="{{ r.event_count }}">{{ crate::ui::n(r.event_count) }}</span>
+      <span class="num x">{{ crate::ui::n(r.user_count) }}</span>
+      <span class="seen x"><span>{{ crate::ui::t(r.last_seen)|safe }}</span><span class="dim">first {{ crate::ui::t(r.first_seen)|safe }}</span></span>
+      {% if x.who.is_empty() %}<span class="x"></span>{% else %}<span class="avatar s x" title="Assigned">{{ x.who }}</span>{% endif %}
+    </div>
+    {% endfor %}
+    {% if let Some(m) = more %}<div class="more"><a class="btn secondary sm" href="{{ m }}" hx-get="{{ m }}" hx-select=".chunk" hx-target="closest .more" hx-swap="outerHTML">Load more</a></div>{% endif %}
+    </div>
+  </div>
+  <div class="bulk" role="toolbar" aria-label="Selected issues"><span class="c sm"></span>
+    <button type="reset" class="ghost sm">Clear</button><span class="vr"></span>
+    <button name="action" value="resolve" class="sm">{{ crate::ui::icon("check")|safe }}Resolve</button>
+    <button name="action" value="mute" class="secondary sm">{{ crate::ui::icon("bell-slash")|safe }}Mute</button>
+    <button name="action" value="approve" class="secondary sm">{{ crate::ui::icon("check-circle")|safe }}Approve</button>
+  </div>
+</form>
+{% endif %}
+</div>
+{% include "keys.html" %}
+{% endblock %}

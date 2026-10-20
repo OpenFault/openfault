@@ -16,7 +16,7 @@ const MAX_EVENT: usize = 1 << 20;
 const INBOX_CAP: i64 = 10_000;
 const DROPPED: &str = "86400:transaction;span;profile;replay;session:organization";
 // ponytail: quotas are constants (Bugsink parity); per-project editing lands with Settings. Monthly 1M quota skipped.
-const QUOTAS: [(i64, usize); 2] = [(300, 1_000), (3600, 5_000)];
+pub const QUOTAS: [(i64, usize); 2] = [(300, 1_000), (3600, 5_000)];
 
 type Q = Query<HashMap<String, String>>;
 

@@ -1,18 +1,23 @@
 {% extends "app.html" %}
 {% block title %}Projects{% endblock %}
 {% block content %}
-<h1>Projects</h1>
+<div class="head"><h1>Settings</h1></div>
 {% include "settings_nav.html" %}
-<ul class="rows">
-{% for p in projects %}<li><a href="/settings/projects/{{ p.slug }}">{{ p.name }}</a> <span class="muted">{{ p.platform }}</span></li>{% endfor %}
-</ul>
+<div class="form-col">
+{% if projects.is_empty() %}<div class="empty">{{ crate::ui::icon("squares-four")|safe }}<p>No projects yet. Create one to get a DSN for your app.</p></div>{% else %}
+<div class="tbl"><table class="rt"><thead><tr><th>Project</th><th>Platform</th><th></th></tr></thead><tbody>
+{% for p in projects %}<tr><td><a href="/settings/projects/{{ p.slug }}"><b>{{ p.name }}</b></a></td><td class="muted">{{ p.platform }}</td><td class="num"><a class="btn ghost sm" href="/projects/{{ p.slug }}/issues">Issues {{ crate::ui::icon("arrow-right")|safe }}</a></td></tr>{% endfor %}
+</tbody></table></div>{% endif %}
 {% if me.is_admin() %}
-<h2>New project</h2>
-{% if let Some(e) = error %}<p class="error">{{ e }}</p>{% endif %}
-<form method="post" action="/settings/projects" class="stack">
-  <label>Name <input name="name" required></label>
-  <label>Platform <select name="platform">{% let current = "" %}{% include "platforms.html" %}</select></label>
-  <button>Create project</button>
-</form>
+<section class="card sec">
+  <h2>New project</h2>
+  {% if let Some(e) = error %}<p class="error">{{ e }}</p>{% endif %}
+  <form method="post" action="/settings/projects" class="stack">
+    <label>Name <input name="name" required></label>
+    <label>Platform <select name="platform">{% let current = "" %}{% include "platforms.html" %}</select></label>
+    <button>{{ crate::ui::icon("plus")|safe }}Create project</button>
+  </form>
+</section>
 {% endif %}
+</div>
 {% endblock %}

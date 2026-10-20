@@ -6,7 +6,7 @@
 {% if let Some(e) = error %}<p class="error">{{ e }}</p>{% endif %}
 <form method="post" action="/invite/{{ token }}" class="stack">
   <label>Your name <input name="name" required autofocus></label>
-  <label>Password <input name="password" type="password" minlength="10" required autocomplete="new-password"></label>
+  <label>Password <input name="password" type="password" minlength="10" required autocomplete="new-password"><span class="hint">At least 10 characters.</span></label>
   <button>Join</button>
 </form>
 {% endblock %}

@@ -1,10 +1,9 @@
 {% extends "app.html" %}
 {% block title %}Set up the SDK{% endblock %}
 {% block content %}
-<h1>Send your first error to {{ project.name }}</h1>
-<p>Your DSN:</p>
-<pre><code>{{ dsn }}</code></pre>
-<p class="muted">Any Sentry SDK works. Point it at this DSN.</p>
+<div class="head"><h1>Send your first error to {{ project.name }}</h1></div>
+<p class="muted">Any Sentry SDK works. Point it at this DSN, trigger an error, and it shows up here within a second.</p>
+{% let copy_text = dsn %}{% include "copy.html" %}
 {% include "snippets.html" %}
 <p><a class="btn" href="/">Go to dashboard</a></p>
 {% endblock %}

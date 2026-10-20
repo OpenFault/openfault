@@ -1,7 +1,11 @@
+pub mod api;
 pub mod auth;
 pub mod db;
 pub mod ingest;
+pub mod issues;
+pub mod live;
 pub mod mail;
+pub mod mcp;
 pub mod process;
 pub mod scrub;
 pub mod sourcemaps;
@@ -51,7 +55,10 @@ pub fn app(state: AppState) -> Router {
             post(ingest::handler::envelope),
         )
         .route("/api/{project_id}/store/", post(ingest::handler::store))
+        .nest("/api/v1", api::routes())
+        .merge(mcp::routes(state.clone()))
         .merge(ui::routes())
+        .merge(live::routes())
         .layer(DefaultBodyLimit::disable())
         .layer(RequestBodyLimitLayer::new(100 * MIB)) // decompressed
         .layer(RequestDecompressionLayer::new())

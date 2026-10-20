@@ -74,6 +74,18 @@ Coming in M6.
 
 Coming in M7.
 
+## Deploy
+
+Run it behind a reverse proxy with HTTPS (and so HTTP/2). Every open tab holds one live-update (SSE) connection, and browsers on HTTP/1.1 allow only 6 per host, so a seventh tab stalls. Caddy does it in three lines:
+
+```
+errors.example.com {
+  reverse_proxy localhost:8080
+}
+```
+
+Set `OPENFAULT_BASE_URL=https://errors.example.com` so DSNs and links use the public address.
+
 ## Upgrade and backup
 
 Coming in M8. Everything lives in the `/data` volume.

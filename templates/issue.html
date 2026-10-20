@@ -1,0 +1,160 @@
+{% extends "app.html" %}
+{% block title %}{{ d.row.title }}{% endblock %}
+{% block live %}issue:{{ d.row.id }}{% endblock %}
+{% block content %}
+{% let r = d.row %}
+<div class="ihead">
+  <h1><span class="dot {{ r.level }}{% if r.status != "unresolved" %} off{% endif %}" title="{{ r.level }}"></span><span>{{ r.title }}</span></h1>
+  <div class="sub">
+    {% if r.status == "resolved" %}<span class="pill solid">{{ crate::ui::icon("check")|safe }}Resolved{% if let Some(v) = d.resolved_in_release %} in {{ v }}{% endif %}{% if d.resolved_next_release %} in next release{% endif %}</span>{% else if r.status == "muted" %}<span class="pill solid">{{ crate::ui::icon("bell-slash")|safe }}Muted</span>{% else %}<span class="pill">Unresolved</span>{% endif %}
+    {% if r.approved_at.is_some() %}<span class="pill">{{ crate::ui::icon("check-circle")|safe }}Approved for fix</span>{% endif %}
+    <a class="pill" href="/projects/{{ r.project_slug }}/issues">{{ r.project_slug }}</a>
+    {% if let Some(a) = assignee %}<span class="pill">{{ crate::ui::icon("user-circle")|safe }}{{ a }}</span>{% endif %}
+    <code class="muted">{{ r.culprit }}</code>
+  </div>
+</div>
+<div class="actions">
+  {% if r.status == "resolved" %}
+  <form method="post" action="/issues/{{ r.id }}/action"><input type="hidden" name="next" value="{{ here }}"><button name="action" value="unresolve" class="secondary sm fw">{{ crate::ui::icon("arrow-counter-clockwise")|safe }}Reopen</button></form>
+  {% else %}
+  <details class="dd"><summary class="btn sm fw{% if r.status != "unresolved" %} secondary{% endif %}">{{ crate::ui::icon("check")|safe }}Resolve {{ crate::ui::icon("caret-down")|safe }}</summary>
+    <div class="pop">
+      <form method="post" action="/issues/{{ r.id }}/action"><input type="hidden" name="next" value="{{ here }}"><button name="action" value="resolve">Resolve now</button></form>
+      <form method="post" action="/issues/{{ r.id }}/action"><input type="hidden" name="next" value="{{ here }}"><input type="hidden" name="next_release" value="1"><button name="action" value="resolve">In the next release</button></form>
+      <hr>
+      <form method="post" action="/issues/{{ r.id }}/action" class="stack"><input type="hidden" name="next" value="{{ here }}">
+        <label>In release <input name="in_release" required class="mono" value="{% if let Some(v) = r.last_release %}{{ v }}{% endif %}" placeholder="1.4.2"></label>
+        <button name="action" value="resolve" class="sm">Resolve in release</button></form>
+    </div></details>
+  {% endif %}
+  {% if r.status == "muted" %}
+  <form method="post" action="/issues/{{ r.id }}/action"><input type="hidden" name="next" value="{{ here }}"><button name="action" value="unmute" class="secondary sm fw">{{ crate::ui::icon("bell")|safe }}Unmute</button></form>
+  {% else %}
+  <details class="dd"><summary class="btn secondary sm fw">{{ crate::ui::icon("bell-slash")|safe }}Mute {{ crate::ui::icon("caret-down")|safe }}</summary>
+    <div class="pop">
+      {% for (v, l) in [("1h", "For 1 hour"), ("1d", "For 1 day"), ("1w", "For 1 week"), ("", "Until unmuted")] %}
+      <form method="post" action="/issues/{{ r.id }}/action"><input type="hidden" name="next" value="{{ here }}"><input type="hidden" name="for" value="{{ v }}"><button name="action" value="mute">{{ l }}</button></form>
+      {% endfor %}
+      <hr>
+      <form method="post" action="/issues/{{ r.id }}/action" class="stack"><input type="hidden" name="next" value="{{ here }}">
+        <div class="meta" style="padding:0">Until it happens again</div>
+        <label>Events <input name="after_count" type="number" min="1" value="100" required></label>
+        <label>Within (minutes) <input name="window_min" type="number" min="1" value="60" required></label>
+        <button name="action" value="mute" class="sm">Mute</button></form>
+    </div></details>
+  {% endif %}
+  <form method="post" action="/issues/{{ r.id }}/action"><input type="hidden" name="next" value="{{ here }}">{% if r.approved_at.is_some() %}<button name="action" value="unapprove" class="secondary sm fw2">{{ crate::ui::icon("x")|safe }}Unapprove</button>{% else %}<button name="action" value="approve" class="secondary sm fw2" title="Lets an agent pick this up">{{ crate::ui::icon("check-circle")|safe }}Approve for fix</button>{% endif %}</form>
+  <details class="dd"><summary class="btn secondary sm">{{ crate::ui::icon("user-circle")|safe }}Assign {{ crate::ui::icon("caret-down")|safe }}</summary>
+    <div class="pop"><form method="post" action="/issues/{{ r.id }}/action"><input type="hidden" name="next" value="{{ here }}"><input type="hidden" name="action" value="assign">
+      {% for m in members %}<button name="user_id" value="{{ m.id }}"><span class="avatar s">{{ m.initials }}</span>&nbsp; {{ m.name }}</button>{% endfor %}
+      <hr><button name="user_id" value="">Unassign</button>
+    </form></div></details>
+  <details class="dd"><summary class="btn secondary sm">{{ crate::ui::icon("link")|safe }}Link fix {{ crate::ui::icon("caret-down")|safe }}</summary>
+    <div class="pop"><form method="post" action="/issues/{{ r.id }}/action" class="stack"><input type="hidden" name="next" value="{{ here }}">
+      <label>Pull request or commit URL <input name="url" type="url" required placeholder="https://github.com/acme/app/pull/42"></label>
+      <label>Note <input name="note" placeholder="Optional"></label>
+      <button name="action" value="link_fix" class="sm">Link fix</button></form></div></details>
+  <a class="btn ghost sm" href="/issues/{{ r.id }}.md" data-copy-url="/issues/{{ r.id }}.md">{{ crate::ui::icon("copy")|safe }}Copy as Markdown</a>
+  <a class="btn ghost sm danger push" href="/issues/{{ r.id }}/delete">{{ crate::ui::icon("trash")|safe }}Delete</a>
+</div>
+<div class="impact" id="impact" hx-get="{{ url }}" hx-select="#impact" hx-trigger="sse:tick throttle:1s" hx-swap="outerHTML">
+  <div class="st"><span class="k">Events</span><b id="i-ev" data-n="{{ r.event_count }}">{{ crate::ui::n(r.event_count) }}</b></div>
+  <div class="st"><span class="k">Users affected</span><b id="i-us" data-n="{{ r.user_count }}">{{ crate::ui::n(r.user_count) }}</b></div>
+  <div class="st"><span class="k">Last seen</span><b>{{ crate::ui::t(r.last_seen)|safe }}</b></div>
+  <div class="st"><span class="k">First seen</span><b>{{ crate::ui::t(r.first_seen)|safe }}</b></div>
+  <div class="st"><span class="k">Releases</span><b class="mono">{% if let Some(f) = first_release %}{{ f }}{% else %}&mdash;{% endif %}{% if let Some(l) = r.last_release %}{% if Some(l.as_str()) != first_release.as_deref() %} {{ crate::ui::icon("arrow-right")|safe }} {{ l }}{% endif %}{% endif %}</b></div>
+  <div class="st"><span class="k">Environments</span><b>{% if d.environments.is_empty() %}&mdash;{% else %}{{ d.environments.join(", ") }}{% endif %}</b></div>
+  {% if let Some(f) = fix_href %}<div class="st"><span class="k">Fix</span><a class="pill fix" href="{{ f }}" rel="noopener noreferrer" target="_blank" title="{{ f }}">{{ crate::ui::icon("git-commit")|safe }}<span>{{ fix_label }}</span>{{ crate::ui::icon("arrow-square-out")|safe }}</a></div>{% endif %}
+  <div class="spark24"><span class="k">Last 24 hours</span>{{ spark|safe }}</div>
+</div>
+{% if let Some(e) = ev %}
+<div class="evnav sm">
+  <span class="muted">Event <code>{{ e.id }}</code> · <span title="{{ crate::ui::abs(e.timestamp) }}">{{ crate::ui::ago(e.timestamp) }}</span>{% if let Some(v) = e.release %} · <code>{{ v }}</code>{% endif %}{% if let Some(v) = e.environment %} · {{ v }}{% endif %}</span>
+  {% if nav.oldest.is_some() || nav.older.is_some() || nav.newer.is_some() || nav.newest.is_some() %}<span class="seg push">
+    {% if let Some(x) = nav.oldest %}<a href="/issues/{{ r.id }}/events/{{ x }}">Oldest</a>{% endif %}
+    {% if let Some(x) = nav.older %}<a href="/issues/{{ r.id }}/events/{{ x }}" rel="prev">{{ crate::ui::icon("arrow-left")|safe }}Older</a>{% endif %}
+    {% if let Some(x) = nav.newer %}<a href="/issues/{{ r.id }}/events/{{ x }}" rel="next">Newer{{ crate::ui::icon("arrow-right")|safe }}</a>{% endif %}
+    {% if nav.newest.is_some() %}<a href="/issues/{{ r.id }}">Newest</a>{% endif %}
+  </span>{% endif %}
+</div>
+{% endif %}
+<div id="tab">
+<nav class="tabs" aria-label="Event data">
+  {% for (k, l) in [("stack", "Stack"), ("breadcrumbs", "Breadcrumbs"), ("request", "Request"), ("tags", "Tags & context"), ("events", "Events"), ("activity", "Activity"), ("grouping", "Grouping")] %}
+  <a href="{{ url }}?tab={{ k }}" hx-get="{{ url }}?tab={{ k }}" hx-select="#tab" hx-target="#tab" hx-swap="outerHTML transition:true" hx-push-url="true"{% if *k == tab %} class="on" aria-current="page"{% endif %}>{{ l }}{% if *k == "activity" %} <span class="dim c">{% if !acts.is_empty() %}{{ acts.len() }}{% endif %}</span>{% endif %}{% if *k == tab %}<i class="ind" aria-hidden="true"></i>{% endif %}</a>
+  {% endfor %}
+</nav>
+<div class="tabp">
+{% if tab == "stack" %}
+  {% if let Some(e) = ev %}{% if e.symbolicated %}<div class="toolbar"><span class="seg"><a href="{{ url }}?tab=stack"{% if !raw %} class="on"{% endif %}>Symbolicated</a><a href="{{ url }}?tab=stack&raw=1"{% if raw %} class="on"{% endif %}>Raw</a></span></div>{% endif %}
+  {% if excs.is_empty() %}{% if let Some(m) = e.message %}<pre class="data">{{ m }}</pre>{% else %}<div class="empty">{{ crate::ui::icon("info")|safe }}<p>This event has no stack trace.</p></div>{% endif %}{% endif %}
+  {% endif %}
+  {% for x in excs %}
+  <section class="exc">
+    <h3>{{ x.type_ }}{% if let Some(m) = x.mechanism %} <span class="pill">{{ m }}</span>{% endif %}</h3>
+    <p class="data">{{ x.value }}</p>
+    {% if x.groups.is_empty() %}<p class="dim sm">No frames.</p>{% else %}
+    <div class="frames">
+    {% for g in x.groups %}
+      {% if g.vendor %}
+      <details class="vgroup frame"><summary>{{ crate::ui::icon("caret-right")|safe }}{{ g.frames.len() }} vendor frame{% if g.frames.len() != 1 %}s{% endif %} <span class="dim">· show</span></summary>
+        <div>{% for f in g.frames %}{% include "frame.html" %}{% endfor %}</div>
+      </details>
+      {% else %}{% for f in g.frames %}{% include "frame.html" %}{% endfor %}{% endif %}
+    {% endfor %}
+    </div>{% endif %}
+  </section>
+  {% endfor %}
+  {% if ev.is_none() %}<div class="empty">{{ crate::ui::icon("info")|safe }}<h3>No stored events</h3><p>Events for this issue have aged out of retention. Counters are still kept.</p></div>{% endif %}
+{% else if tab == "breadcrumbs" %}
+  {% if crumbs.is_empty() %}<div class="empty">{{ crate::ui::icon("info")|safe }}<h3>No breadcrumbs</h3><p>The SDK didn't record any trail before this event.</p></div>{% else %}
+  <ol class="tl">
+  {% for c in crumbs %}
+    <li><span class="ic" aria-hidden="true">{{ crate::ui::icon(c.icon)|safe }}</span>
+      <div><div class="sm"><b>{{ c.cat }}</b>{% if !c.level.is_empty() && c.level != "info" %} <span class="pill{% if c.level == "error" %} red{% endif %}">{{ c.level }}</span>{% endif %}</div>
+        {% if !c.msg.is_empty() %}<p class="data">{{ c.msg }}</p>{% endif %}
+        {% if let Some(dd) = c.data %}<details class="json"><summary>data</summary><pre class="data">{{ dd }}</pre></details>{% endif %}</div>
+      <span class="when">{{ c.when }}</span></li>
+  {% endfor %}
+    <li><span class="ic crash">{{ crate::ui::icon("warning")|safe }}</span><div class="sm"><b>Crash</b></div><span class="when">0.0s</span></li>
+  </ol>{% endif %}
+{% else if tab == "request" %}
+  {% if let Some(rq) = req %}
+  <p><span class="pill">{{ rq.method }}</span> <code>{{ rq.url }}</code></p>
+  {% if !rq.query.is_empty() %}<h3>Query</h3><dl class="kv">{% for (k, v) in rq.query %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}</dl>{% endif %}
+  {% if !rq.headers.is_empty() %}<h3>Headers</h3><dl class="kv">{% for (k, v) in rq.headers %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}</dl>{% endif %}
+  {% if let Some(b) = rq.body %}<h3>Body</h3><pre class="data">{{ b }}</pre>{% endif %}
+  {% else %}<div class="empty">{{ crate::ui::icon("info")|safe }}<h3>No request data</h3><p>This event wasn't captured during an HTTP request.</p></div>{% endif %}
+{% else if tab == "tags" %}
+  {% if let Some(e) = ev %}
+  {% if !user.is_empty() %}<h3 style="margin-top:0">User</h3><dl class="kv">{% for (k, v) in user %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}</dl>{% endif %}
+  <h3>Tags</h3>{% if e.tags.is_empty() %}<p class="dim">No tags.</p>{% else %}<dl class="kv">{% for (k, v) in e.tags %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}</dl>{% endif %}
+  <h3>Context</h3>{% if ctx.is_empty() %}<p class="dim">No context.</p>{% else %}<dl class="kv">{% for (k, v) in ctx %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}</dl>{% endif %}
+  {% else %}<div class="empty">{{ crate::ui::icon("info")|safe }}<p>No stored event.</p></div>{% endif %}
+{% else if tab == "events" %}
+  {% if events.is_empty() %}<div class="empty">{{ crate::ui::icon("info")|safe }}<h3>No stored events</h3><p>Older events age out with the project's retention.</p></div>{% else %}
+  <p class="sm muted">{{ crate::ui::n(d.stored_count) }} of {{ crate::ui::n(r.event_count) }} events stored. The rest are counted, not kept.</p>
+  <div class="tbl"><table class="rt"><thead><tr><th>Event</th><th>When</th><th>Release</th><th>Environment</th><th>User</th></tr></thead><tbody>
+  {% for e in events %}<tr><td><a class="mono" href="/issues/{{ r.id }}/events/{{ e.id }}">{{ e.id }}</a></td><td class="muted" title="{{ crate::ui::abs(e.timestamp) }}">{{ crate::ui::ago(e.timestamp) }}</td>
+    <td class="mono">{% if let Some(v) = e.release %}{{ v }}{% endif %}</td><td>{% if let Some(v) = e.environment %}{{ v }}{% endif %}</td><td class="mono">{% if let Some(v) = e.user_label %}{{ v }}{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% if let Some(c) = events_more %}<a class="btn secondary sm" href="{{ url }}?tab=events&ecursor={{ c }}">Older events</a>{% endif %}
+  {% endif %}
+{% else if tab == "activity" %}
+  <form method="post" action="/issues/{{ r.id }}/action" class="cmt"><input type="hidden" name="next" value="{{ url }}?tab=activity">
+    <textarea name="text" rows="3" required maxlength="10000" placeholder="Leave a note for your team" aria-label="Comment" style="font-family:var(--sans);font-size:14px"></textarea>
+    <button name="action" value="comment" class="sm">Comment</button></form>
+  {% if acts.is_empty() %}<p class="dim" style="margin-top:24px">No activity yet.</p>{% else %}
+  <ol class="tl" style="margin-top:24px">{% for a in acts %}
+    <li><span class="ic">{{ a.initials }}</span><div><div><b>{{ a.who }}</b> <span class="muted">{{ a.text }}</span></div>{% if let Some(t) = a.detail %}<p class="data card" style="margin-top:6px;padding:8px 12px">{{ t }}</p>{% endif %}</div>
+      <span class="when" title="{{ crate::ui::abs(a.at) }}">{{ crate::ui::ago(a.at) }}</span></li>{% endfor %}
+  </ol>{% endif %}
+{% else %}
+  <p class="muted">Events whose hash matches any of these join this issue.</p>
+  <dl class="kv">{% for h in d.fingerprint_hashes %}<dt>{% if loop.first %}default{% else %}hash {{ loop.index }}{% endif %}</dt><dd>{{ h }}</dd>{% endfor %}
+  {% if let Some(fp) = fingerprint %}<dt>SDK fingerprint</dt><dd>{{ fp }}</dd>{% endif %}</dl>
+{% endif %}
+</div>
+</div>
+{% include "keys.html" %}
+{% endblock %}

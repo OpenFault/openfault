@@ -1,34 +1,52 @@
 {% extends "app.html" %}
 {% block title %}{{ project.name }}{% endblock %}
 {% block content %}
-<h1>{{ project.name }}</h1>
+<div class="head"><h1>{{ project.name }}</h1><a class="btn secondary sm" href="/projects/{{ project.slug }}/issues">View issues {{ crate::ui::icon("arrow-right")|safe }}</a></div>
 {% include "settings_nav.html" %}
+<div class="form-col">
+<section class="card sec">
+  <h2>DSN</h2>
+  <p class="muted sm">Paste this into your SDK config. It's the newest active key below.</p>
+  {% let copy_text = dsn %}{% include "copy.html" %}
+  <h3>Keys</h3>
+  <div class="tbl"><table class="rt">
+  <thead><tr><th>Label</th><th>Created</th><th>Key</th><th></th></tr></thead>
+  <tbody>
+  {% for k in keys %}
+  <tr{% if !k.active %} class="dim"{% endif %}>
+    <td><b>{{ k.label }}</b></td><td class="muted">{{ crate::ui::t(k.created_at)|safe }}</td><td><code title="{{ k.dsn }}">{{ k.public_key_short }}</code></td>
+    <td class="num">{% if k.active %}{% if me.is_admin() %}<form method="post" action="/settings/projects/{{ project.slug }}/keys/{{ k.id }}/revoke" class="inline"><button class="ghost sm danger">Revoke</button></form>{% endif %}{% else %}<span class="pill">revoked</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+  </table></div>
+  {% if me.is_admin() %}
+  <form method="post" action="/settings/projects/{{ project.slug }}/keys" class="inline">
+    <input name="label" placeholder="Key label" aria-label="Key label" required> <button class="secondary sm">{{ crate::ui::icon("plus")|safe }}New key</button>
+  </form>
+  {% endif %}
+</section>
 {% if me.is_admin() %}
-<form method="post" action="/settings/projects/{{ project.slug }}" class="stack">
-  <label>Name <input name="name" value="{{ project.name }}" required></label>
-  <label>Platform <select name="platform">{% let current = project.platform.as_str() %}{% include "platforms.html" %}</select></label>
-  <label>Retention (days) <input name="retention_days" type="number" min="1" max="3650" value="{{ project.retention_days }}"></label>
-  <label class="check"><input type="checkbox" name="store_ip" value="1"{% if project.store_ip %} checked{% endif %}> Store client IP addresses</label>
-  <button>Save</button>
-</form>
+<section class="card sec">
+  <h2>Project</h2>
+  <form method="post" action="/settings/projects/{{ project.slug }}" class="stack">
+    <label>Name <input name="name" value="{{ project.name }}" required></label>
+    <label>Platform <select name="platform">{% let current = project.platform.as_str() %}{% include "platforms.html" %}</select></label>
+    <label>Retention (days) <input name="retention_days" type="number" min="1" max="3650" value="{{ project.retention_days }}"></label>
+    <label class="check"><input type="checkbox" name="store_ip" value="1"{% if project.store_ip %} checked{% endif %}> Store client IP addresses</label>
+    <label>In-app rules <textarea name="inapp_rules" rows="4" placeholder="app/&#10;src/&#10;!node_modules/">{{ project.inapp_rules }}</textarea><span class="hint">One path prefix per line; prefix with ! to mark as vendor.</span></label>
+    <button>Save</button>
+  </form>
+</section>
 {% endif %}
-<h2>DSN keys</h2>
-<table>
-<thead><tr><th>Label</th><th>DSN</th><th></th></tr></thead>
-<tbody>
-{% for k in keys %}
-<tr{% if !k.active %} class="muted"{% endif %}>
-  <td>{{ k.label }}</td><td><code>{{ k.dsn }}</code></td>
-  <td>{% if k.active %}{% if me.is_admin() %}<form method="post" action="/settings/projects/{{ project.slug }}/keys/{{ k.id }}/revoke" class="inline"><button class="secondary">Revoke</button></form>{% endif %}{% else %}revoked{% endif %}</td>
-</tr>
-{% endfor %}
-</tbody>
-</table>
-{% if me.is_admin() %}
-<form method="post" action="/settings/projects/{{ project.slug }}/keys" class="inline">
-  <input name="label" placeholder="Label" required> <button class="secondary">New key</button>
-</form>
-{% endif %}
-<h2>SDK setup</h2>
-{% include "snippets.html" %}
+<section class="card sec">
+  <h2>Quotas</h2>
+  <dl class="kv">{% for q in quotas %}<dt>Per {{ q.0 }}</dt><dd>{{ q.1 }} events</dd>{% endfor %}</dl>
+  <p class="hint">Events over quota are dropped with HTTP 429 and counted on the dashboard.</p>
+</section>
+<section class="card sec">
+  <h2>SDK setup</h2>
+  {% include "snippets.html" %}
+</section>
+</div>
 {% endblock %}

@@ -1,0 +1,47 @@
+{% extends "app.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div id="dash" hx-get="{{ me.url }}" hx-select="#dash" hx-trigger="sse:tick throttle:1s" hx-swap="outerHTML">
+<div class="head">
+  <h1>Dashboard</h1>
+  <nav class="seg" aria-label="Range">{% for r in ["24h", "7d", "30d"] %}<a href="/?range={{ r }}" hx-get="/?range={{ r }}" hx-select="#dash" hx-target="#dash" hx-swap="outerHTML transition:true" hx-push-url="true"{% if *r == range %} class="on" aria-current="true"{% endif %}>{{ r }}{% if *r == range %}<i class="ind" aria-hidden="true"></i>{% endif %}</a>{% endfor %}</nav>
+</div>
+<div class="tabp">
+{% if me.projects.is_empty() %}
+<div class="empty">{{ crate::ui::icon("squares-four")|safe }}<p>{% if me.is_admin() %}Create a project to get a DSN and start sending errors.{% else %}You're not in any project yet. Ask an admin to add you.{% endif %}</p>{% if me.is_admin() %}<a class="btn" href="/settings/projects">{{ crate::ui::icon("plus")|safe }}Create a project</a>{% endif %}</div>
+{% else if empty %}
+<div class="empty">{{ crate::ui::icon("lightning")|safe }}<p>Waiting for your first event. Point any Sentry SDK at your DSN and throw an error.</p><a class="btn" href="/projects/{{ me.projects[0].slug }}/setup-sdk">Set up the SDK</a></div>
+{% else %}
+<section class="overview">
+  <div class="tiles">
+    <div><span class="k">Events received</span><b id="t-rec" data-n="{{ received }}">{{ crate::ui::n(received) }}</b><span class="sm dim">{{ label }}{% if dropped > 0 %} · {{ crate::ui::n(dropped) }} dropped{% endif %}</span></div>
+    <div><span class="k">Unresolved</span><b id="t-un" data-n="{{ unresolved }}">{{ crate::ui::n(unresolved) }}</b><span class="sm dim">right now</span></div>
+    <div><span class="k">New issues</span><b id="t-new" data-n="{{ new_issues }}">{{ crate::ui::n(new_issues) }}</b><span class="sm dim">{{ label }}</span></div>
+    <div><span class="k">Regressions</span><b id="t-reg" data-n="{{ regressions }}"{% if regressions > 0 %} class="error"{% endif %}>{{ crate::ui::n(regressions) }}</b><span class="sm dim">{{ label }}</span></div>
+  </div>
+  <div class="overtime"><div class="ph"><span class="k">Events over time</span><span class="sm dim">{{ label }}</span></div>{{ overall|safe }}</div>
+</section>
+<div class="grid">
+{% for c in cards %}
+  <a class="card pcard" href="/projects/{{ c.slug }}/issues">
+    <div class="ph"><b>{{ c.name }}</b><span class="sm dim"><span id="c{{ loop.index }}-r" data-n="{{ c.received }}">{{ crate::ui::n(c.received) }}</span> events</span></div>
+    {{ c.chart|safe }}
+    <div class="nums"><span><b>{{ c.unresolved }}</b> unresolved</span><span><b>{{ c.new_issues }}</b> new</span><span><b{% if c.regressions > 0 %} class="error"{% endif %}>{{ c.regressions }}</b> regressed</span></div>
+  </a>
+{% endfor %}
+</div>
+<h2>Top issues by users affected</h2>
+{% if top.is_empty() %}<div class="empty">{{ crate::ui::icon("check-circle")|safe }}<p>No issues seen in the {{ label }}. Quiet is good.</p></div>{% else %}
+<div class="tbl"><table class="rt">
+<thead><tr><th>Issue</th><th>Project</th><th class="num">Users</th><th class="num">Events</th><th class="num">Last seen</th></tr></thead>
+<tbody>{% for r in top %}<tr>
+  <td><a class="it" href="/issues/{{ r.id }}"><span class="dot {{ r.level }}"></span><b>{{ r.title }}</b></a></td>
+  <td><span class="pill">{{ r.project_slug }}</span></td>
+  <td class="num">{{ crate::ui::n(r.user_count) }}</td><td class="num">{{ crate::ui::n(r.event_count) }}</td>
+  <td class="num muted">{{ crate::ui::t(r.last_seen)|safe }}</td>
+</tr>{% endfor %}</tbody>
+</table></div>{% endif %}
+{% endif %}
+</div>
+</div>
+{% endblock %}

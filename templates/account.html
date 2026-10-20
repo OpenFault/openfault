@@ -1,18 +1,25 @@
 {% extends "app.html" %}
 {% block title %}Account{% endblock %}
 {% block content %}
-<h1>Account</h1>
+<div class="head"><h1>Settings</h1></div>
 {% include "settings_nav.html" %}
-{% if let Some(m) = msg %}<p class="notice">{{ m }}</p>{% endif %}
-<form method="post" action="/settings/account" class="stack">
-  <label>Email <input value="{{ me.email }}" disabled></label>
-  <label>Name <input name="name" value="{{ me.name }}" required></label>
-  <button>Save</button>
-</form>
-<h2>Change password</h2>
-<form method="post" action="/settings/account/password" class="stack">
-  <label>Current password <input name="current" type="password" required autocomplete="current-password"></label>
-  <label>New password <input name="new" type="password" minlength="10" required autocomplete="new-password"></label>
-  <button>Change password</button>
-</form>
+{% if let Some(m) = msg %}<div class="toast" role="status">{{ crate::ui::icon("check-circle")|safe }}{{ m }}</div>{% endif %}
+<div class="form-col">
+<section class="card sec">
+  <h2>Profile</h2>
+  <form method="post" action="/settings/account" class="stack">
+    <label>Email <input value="{{ me.email }}" disabled></label>
+    <label>Name <input name="name" value="{{ me.name }}" required></label>
+    <button>Save</button>
+  </form>
+</section>
+<section class="card sec">
+  <h2>Change password</h2>
+  <form method="post" action="/settings/account/password" class="stack">
+    <label>Current password <input name="current" type="password" required autocomplete="current-password"></label>
+    <label>New password <input name="new" type="password" minlength="10" required autocomplete="new-password"><span class="hint">At least 10 characters.</span></label>
+    <button>Change password</button>
+  </form>
+</section>
+</div>
 {% endblock %}

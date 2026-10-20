@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}TV{% endblock %}
+{% block body %}
+<script>document.documentElement.dataset.theme = "dark"</script>
+<div class="tv" hx-ext="sse" sse-connect="/live?scope={{ scope }}">
+<header class="tv-top">
+  <span class="wordmark"><span class="mark" aria-hidden="true"></span>OpenFault</span><span class="sep">/</span><span class="muted">{{ org }}{% if let Some(t) = title %} · {{ t }}{% endif %}</span>
+  <span class="live" id="live" title="Live updates">Live</span>
+  <time class="clock" id="clock"></time>
+</header>
+<div id="tvx" class="tv-body" hx-get="{{ me.url }}" hx-select="#tvx" hx-trigger="sse:tick throttle:1s" hx-swap="outerHTML">
+  <section class="tv-tiles">
+    <div class="hero"><span class="k">Unresolved</span><b id="tv-u" data-n="{{ unresolved }}">{{ crate::ui::n(unresolved) }}</b></div>
+    <div><span class="k">Events · 1h</span><b id="tv-1h" data-n="{{ received_1h }}">{{ crate::ui::n(received_1h) }}</b></div>
+    <div><span class="k">Events · 24h</span><b id="tv-24h" data-n="{{ received_24h }}">{{ crate::ui::n(received_24h) }}</b></div>
+    <div><span class="k">New issues · 24h</span><b id="tv-new" data-n="{{ new_issues }}">{{ crate::ui::n(new_issues) }}</b></div>
+    <div><span class="k">Regressions · 24h</span><b id="tv-reg" data-n="{{ regressions }}"{% if regressions > 0 %} class="error"{% endif %}>{{ crate::ui::n(regressions) }}</b></div>
+  </section>
+  <section class="tv-main">
+    <div class="tv-left">
+      <div class="tv-panel"><div class="tv-ph"><span class="k">Last hour</span><span class="dim">5-minute buckets</span></div>{{ hour|safe }}</div>
+      <div class="tv-projects" id="tvp">
+      {% for c in cards %}
+        <div class="tv-card">
+          <div class="tv-ph"><b>{{ c.name }}</b>{% if let Some((up, t)) = c.trend %}<span class="trend{% if *up %} up{% endif %}" title="Last 12 hours vs the 12 before">{{ t }}</span>{% endif %}</div>
+          {{ c.chart|safe }}
+          <div class="tv-nums"><span><b>{{ crate::ui::n(c.unresolved) }}</b> unresolved</span><span><b>{{ crate::ui::n(c.received) }}</b> events · 24h</span></div>
+        </div>
+      {% endfor %}
+      </div>
+    </div>
+    <aside class="tv-latest">
+      <div class="tv-ph"><span class="k">Latest</span></div>
+      {% if latest.is_empty() %}<p class="dim">No issues yet. Quiet is good.</p>{% else %}
+      <ol>{% for r in latest %}<li data-k="{{ r.id }}"><span class="dot {{ r.level }}{% if r.status != "unresolved" %} off{% endif %}"></span><div><b>{{ r.title }}</b><span class="dim">{{ r.project_slug }} · {{ crate::ui::ago(r.first_seen) }}</span></div></li>{% endfor %}</ol>{% endif %}
+      <div class="tv-qr">{{ qr|safe }}<span class="dim">Scan to open<br>on your phone</span></div>
+    </aside>
+  </section>
+</div>
+</div>
+{% endblock %}

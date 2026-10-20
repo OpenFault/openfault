@@ -190,6 +190,9 @@ Design: black and white, one accent only for state (red error dot, green resolve
 
 Pages:
 - **Home dashboard** (cross-project): events/day for every project the user belongs to as animated SVG sparklines, new issues, regressions, top issues by users affected, release health per project, a 24h/7d/30d switch. Charts are inline SVG with CSS `stroke-dashoffset` draw-in and bar `scaleY` transitions, `prefers-reduced-motion` respected.
+- **Live updates**: one SSE endpoint (`GET /events/stream?scope=project:x|issue:y|all`) fed by a tokio broadcast channel the processor publishes to after each batch; htmx `sse` extension swaps counters, rows and chart fragments. No polling, no websockets. Reconnect automatic.
+- **TV mode** `/tv`: fullscreen, dark, no chrome, big numbers, live per-project charts, newest-issues ticker, auto-cycles projects every 20s, QR to open on phone. Meant to stay open on a team screen.
+- **Charts**: small area charts with gradient fills, thin bars, animated transitions on data change, soft highlight on live values; `prefers-reduced-motion` respected. Elegant and futuristic, not loud.
 - **Issue list**: filters (status, level, release, environment, assignee, date), search syntax `is:unresolved release:1.2 env:prod user:x "text"`, sort by last seen / first seen / events / users, saved views (per user, pinned in sidebar), bulk resolve/mute, `j/k` move, `enter` open, `r` resolve, `m` mute, `a` approve, `⌘k` palette.
 - **Issue detail**: title, culprit, impact strip (events, users, first/last seen, releases), stack (in-app first, vendor collapsed, raw/resolved toggle), breadcrumbs timeline, request, tags, user, event switcher (prev/next, oldest/newest), activity + comments, Grouping panel, Approve-for-fix button, fix link.
 - **Releases**: list with first seen, issues introduced / resolved, commit SHA, link.

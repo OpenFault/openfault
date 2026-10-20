@@ -1,5 +1,5 @@
 //! Hash components in priority order (PLAN §5). An event joins an issue if any hash matches.
-use super::normalize::{classify, first_line, frame_key, parameterize};
+use super::normalize::{Rule, classify_with, first_line, frame_key, parameterize};
 use serde_json::Value;
 
 pub struct Grouping {
@@ -58,7 +58,7 @@ fn message(ev: &Value) -> &str {
     .unwrap_or("")
 }
 
-fn stack_hash(platform: &str, excs: &[Value]) -> Option<String> {
+fn stack_hash(platform: &str, excs: &[Value], rules: &[Rule]) -> Option<String> {
     let usable: Vec<(&Value, Vec<(&Value, bool)>)> = excs
         .iter()
         .map(|e| {
@@ -66,7 +66,7 @@ fn stack_hash(platform: &str, excs: &[Value]) -> Option<String> {
                 e,
                 frames(e)
                     .iter()
-                    .map(|f| (f, classify(f)))
+                    .map(|f| (f, classify_with(f, rules)))
                     .filter(|(_, (_, g))| *g)
                     .map(|(f, (a, _))| (f, a))
                     .collect(),
@@ -98,13 +98,18 @@ fn stack_hash(platform: &str, excs: &[Value]) -> Option<String> {
 }
 
 pub fn group(ev: &Value) -> Grouping {
+    group_with(ev, &[])
+}
+
+/// `rules`: the project's in-app rules, applied after the built-ins.
+pub fn group_with(ev: &Value, rules: &[Rule]) -> Grouping {
     let platform = str_at(ev, "platform");
     let excs = exceptions(ev);
     let last = excs.last();
     let msg = message(ev);
 
     let mut default = Vec::new();
-    default.extend(stack_hash(platform, excs));
+    default.extend(stack_hash(platform, excs, rules));
     if let Some(e) = last {
         let ty = if synthetic(e) { "" } else { str_at(e, "type") };
         let val = parameterize(first_line(str_at(e, "value")));
@@ -169,7 +174,7 @@ pub fn group(ev: &Value) -> Grouping {
     };
 
     let culprit = last
-        .and_then(|e| frames(e).iter().rev().find(|f| classify(f).0))
+        .and_then(|e| frames(e).iter().rev().find(|f| classify_with(f, rules).0))
         .map(|f| {
             let loc = [str_at(f, "module"), str_at(f, "filename")]
                 .into_iter()

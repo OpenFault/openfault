@@ -1,28 +1,37 @@
 {% extends "app.html" %}
 {% block title %}Members{% endblock %}
 {% block content %}
-<h1>Members</h1>
+<div class="head"><h1>Settings</h1></div>
 {% include "settings_nav.html" %}
-<table>
+<div class="form-col">
+<div class="tbl"><table class="rt">
 <thead><tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr></thead>
 <tbody>
 {% for m in users %}
 <tr>
-  <td>{{ m.name }}</td><td>{{ m.email }}</td>
-  <td>{% if m.role == "owner" %}owner{% else %}
+  <td><span class="avatar s">{{ crate::ui::initials(m.name, m.email) }}</span> {{ m.name }}</td><td class="muted">{{ m.email }}</td>
+  <td>{% if m.role == "owner" %}<span class="pill">owner</span>{% else %}
     <form method="post" action="/settings/members/{{ m.id }}/role" class="inline">
-      <select name="role">{% for r in ["admin", "member"] %}<option{% if *r == m.role.as_str() %} selected{% endif %}>{{ r }}</option>{% endfor %}</select>
-      <button class="secondary">Change</button>
+      <select name="role" aria-label="Role">{% for r in ["admin", "member"] %}<option{% if *r == m.role.as_str() %} selected{% endif %}>{{ r }}</option>{% endfor %}</select>
+      <button class="secondary sm">Change</button>
     </form>{% endif %}</td>
-  <td>{% if m.role != "owner" %}<form method="post" action="/settings/members/{{ m.id }}/remove" class="inline"><button class="secondary">Remove</button></form>{% endif %}</td>
+  <td class="num">{% if m.role != "owner" %}<form method="post" action="/settings/members/{{ m.id }}/remove" class="inline"><button class="ghost sm danger">Remove</button></form>{% endif %}</td>
 </tr>
 {% endfor %}
 </tbody>
-</table>
+</table></div>
+<h2>Pending invites</h2>
+{% if invites.is_empty() %}<p class="muted">No pending invites.</p>{% else %}
+<div class="tbl"><table class="rt">
+<thead><tr><th>Email</th><th>Role</th><th>Expires</th><th></th></tr></thead>
+<tbody>{% for i in invites %}<tr><td>{{ i.email }}</td><td>{{ i.role }}</td><td class="muted" title="{{ crate::ui::abs(i.expires_at) }}">{{ crate::ui::abs(i.expires_at) }}</td>
+<td class="num"><form method="post" action="/settings/members/invites/{{ i.hash }}/revoke" class="inline"><button class="ghost sm danger">Revoke</button></form></td></tr>{% endfor %}</tbody>
+</table></div>{% endif %}
+<section class="card sec">
 <h2>Invite</h2>
 {% if let Some(link) = invite_link %}
-<p>{% if smtp %}Invite sent. You can also share this link:{% else %}SMTP not configured, copy this link:{% endif %}</p>
-<pre><code>{{ link }}</code></pre>
+<p class="notice">{% if smtp %}Invite sent to {{ invited }}. You can also share this link:{% else %}Invite created for {{ invited }}. SMTP not configured, so copy this link to them:{% endif %}</p>
+{% let copy_text = link %}{% include "copy.html" %}
 {% endif %}
 <form method="post" action="/settings/members/invite" class="stack">
   <label>Email <input name="email" type="email" required></label>
@@ -30,6 +39,8 @@
   <fieldset><legend>Projects (members only see these)</legend>
   {% for p in projects %}<label class="check"><input type="checkbox" name="p" value="{{ p.id }}"> {{ p.name }}</label>{% endfor %}
   </fieldset>
-  <button>Create invite</button>
+  <button>Send invite</button>
 </form>
+</section>
+</div>
 {% endblock %}

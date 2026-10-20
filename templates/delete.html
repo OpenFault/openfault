@@ -1,0 +1,11 @@
+{% extends "app.html" %}
+{% block title %}Delete issue{% endblock %}
+{% block content %}
+<nav class="crumbs sm" aria-label="Breadcrumb"><a href="/projects/{{ slug }}/issues">{% if let Some(p) = me.scope %}{{ p.name }}{% else %}{{ slug }}{% endif %}</a>{{ crate::ui::icon("caret-right")|safe }}<a href="/issues/{{ id }}" class="ell">{{ title }}</a>{{ crate::ui::icon("caret-right")|safe }}<span>Delete</span></nav>
+<div class="card confirm">
+  <span class="ic-lg danger">{{ crate::ui::icon("trash")|safe }}</span>
+  <h1>Delete this issue?</h1>
+  <p class="muted">&ldquo;<span class="mono">{{ title }}</span>&rdquo; and all of its stored events will be removed. If the error happens again it comes back as a new issue.</p>
+  <form method="post" action="/issues/{{ id }}/delete" class="inline"><button class="destructive">{{ crate::ui::icon("trash")|safe }}Delete issue</button><a class="btn secondary" href="/issues/{{ id }}">Cancel</a></form>
+</div>
+{% endblock %}

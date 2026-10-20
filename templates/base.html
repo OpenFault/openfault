@@ -4,8 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}OpenFault{% endblock %} · OpenFault</title>
-<link rel="stylesheet" href="/static/app.css">
-<script src="/static/htmx.min.js" defer></script>
+<script>try{var t=localStorage.getItem("of-theme");if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+<link rel="preload" href="/static/fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/static/fonts/geist-mono.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/app.css?v={{ crate::ui::V }}">
+<script src="/static/htmx.min.js?v={{ crate::ui::V }}" defer></script>
+<script src="/static/sse.js?v={{ crate::ui::V }}" defer></script>
+<script src="/static/app.js?v={{ crate::ui::V }}" defer></script>
 </head>
 <body>{% block body %}{% endblock %}</body>
 </html>

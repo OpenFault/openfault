@@ -1,0 +1,22 @@
+{% extends "app.html" %}
+{% block title %}Notifications{% endblock %}
+{% block content %}
+<div class="head"><h1>Settings</h1></div>
+{% include "settings_nav.html" %}
+<div class="form-col">
+{% if rows.is_empty() %}<div class="empty">{{ crate::ui::icon("bell")|safe }}<p>Notification settings appear once you're in a project.</p></div>{% else %}
+<p class="muted">Choose what reaches you, per project. Push goes to the OpenFault iOS app.</p>
+<form method="post" action="/settings/notifications" class="stack wide">
+<div class="ngrid nhead" aria-hidden="true"><span></span>{% for (_, l) in kinds %}<span>{{ l }}</span>{% endfor %}</div>
+{% for r in rows %}
+<section class="card nproj">
+  <h3>{{ r.name }}</h3>
+  <div class="ngrid" role="group" aria-label="{{ r.name }} email"><span class="chn">{{ crate::ui::icon("envelope-simple")|safe }}Email</span>{% for (k, e, _) in r.cells %}<label class="sw" title="Email: {{ k }}"><input type="checkbox" role="switch" name="e:{{ r.project_id }}:{{ k }}"{% if *e %} checked{% endif %} aria-label="Email on {{ k }}"><span></span></label>{% endfor %}</div>
+  <div class="ngrid" role="group" aria-label="{{ r.name }} push"><span class="chn">{{ crate::ui::icon("bell")|safe }}Push</span>{% for (k, _, p) in r.cells %}<label class="sw" title="Push: {{ k }}"><input type="checkbox" role="switch" name="p:{{ r.project_id }}:{{ k }}"{% if *p %} checked{% endif %} aria-label="Push on {{ k }}"><span></span></label>{% endfor %}</div>
+</section>
+{% endfor %}
+<button>Save</button>
+</form>
+{% endif %}
+</div>
+{% endblock %}
