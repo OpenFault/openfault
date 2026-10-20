@@ -2,7 +2,7 @@
 
 Open-source (MIT), self-hosted, Sentry-compatible error tracker. One container, SQLite, MCP-first API, native iOS app. First users: FeatureOS, SupportWire. Goal: replace Sentry and Bugsink for small and mid-size teams, with a UI that is a delight to use.
 
-Status (2026-10-20, commit 9613d3d): M0–M6 built and pushed; M7 iOS in progress; M8 pending. Repo: `github.com/OpenFault/openfault` (private until launch). iOS: `github.com/OpenFault/openfault-ios`. Landing: `github.com/OpenFault/openfault.dev` (Cloudflare Pages).
+Status (2026-10-20, commit 73f27eb): M0–M6 built and pushed; M7 iOS phase 1 built (pairing, dashboard, issues, detail, releases, settings, widgets, SSE live, push), reviewed and verified in the simulator; M8 dogfood pending a deploy decision. Repo: `github.com/OpenFault/openfault` (private until launch). iOS: `github.com/OpenFault/openfault-ios`. Landing + docs: `github.com/OpenFault/openfault.dev` (Cloudflare Pages).
 
 ## 0. Principles
 
