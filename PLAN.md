@@ -279,6 +279,7 @@ Companies will depend on this. Reliability is the product.
 - Live: per-user SSE connection cap; lagged-tick counts include invisible projects.
 - Ingest: monthly quota; per-project quota settings UI; "unseen environment" store rule.
 - Auth: SSO (post-v1), teams-as-groups (post-v1), password sign-in from iOS (API).
+- Help center: publish help articles to the OpenFault FeatureOS KB (openfault.featureos.app/admin/kb) via the FeatureOS MCP.
 - Docs: /docs site content; backup/restore guide; upgrade notes.
 
 ## 14. Out of scope (v1)

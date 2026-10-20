@@ -137,7 +137,7 @@ pub fn render(t: impl Template) -> R {
     Ok(Html(t.render()?).into_response())
 }
 /// static asset cache-buster; bump when static/ changes.
-pub const V: &str = "0.1.0-m3.12";
+pub const V: &str = "0.1.0-m3.13";
 
 /// A Phosphor icon from the sprite (`static/icons.svg`); render with `|safe`.
 pub fn icon(name: &str) -> String {

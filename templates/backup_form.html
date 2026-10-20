@@ -3,7 +3,7 @@
   <fieldset{% if v.env %} disabled{% endif %}><legend>S3-compatible storage</legend>
     <p class="hint">{% if v.env %}Set by environment (OPENFAULT_BACKUP_S3_*).{% else %}Once a day the database is snapshotted, compressed and uploaded. Works with Amazon S3, Cloudflare R2, MinIO and other S3-compatible stores.{% endif %}</p>
     <label class="check"><input type="checkbox" name="enabled" value="1"{% if v.b.enabled %} checked{% endif %}> Daily backups on</label>
-    <div class="actions">
+    <div class="preset">
       <label>Preset <select aria-label="Storage preset" onchange="if(this.value){var f=this.form;f.endpoint.value='https://s3.'+this.value+'.amazonaws.com';f.region.value=this.value;f.path_style.checked=false}"><option value="">Amazon S3 region…</option>{% for r in crate::ui::SES_REGIONS %}<option value="{{ r }}">Amazon S3 · {{ r }}</option>{% endfor %}</select></label>
       <button type="button" class="secondary" onclick="var f=this.form;f.endpoint.value='https://&lt;account&gt;.r2.cloudflarestorage.com';f.region.value='auto';f.path_style.checked=true;f.endpoint.focus()">Cloudflare R2</button>
     </div>
