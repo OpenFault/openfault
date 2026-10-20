@@ -253,7 +253,7 @@ Each milestone ends with a verify step before the next starts.
 | M4 | REST API + tokens + MCP | `claude mcp add` against local binary; `list_new_issues` → `get_issue` → `link_fix` → `resolve_issue` round trip; unapproved issue is withheld ✅ |
 | M5 | Source maps: upload endpoints + resolution | `sentry-cli sourcemaps upload` from a Next.js build, minified frame resolves to file:line ✅ |
 | M6 | Notifications: email, webhooks, `openfault relay` mode + hosted relay, preferences, README setup docs | each trigger fires once; prefs honored ✅ |
-| M7 | iOS app + widgets + push | TestFlight build; QR pairing; widgets render; push deep-links |
+| M7 | iOS app + widgets + push | TestFlight build; QR pairing; widgets render; push deep-links ✅ (phase 1) |
 | M8 | Dogfood on FeatureOS + SupportWire, docs, public repo, ghcr `:latest` | 2 weeks of real traffic under 100 MB |
 
 M1 is where the first commit of real code lands, as asked: ingest path with a real SDK event test.
