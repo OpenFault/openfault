@@ -13,5 +13,6 @@
   <label>Platform <select name="platform">{% let current = "" %}{% include "platforms.html" %}</select></label>
   <button>Create</button>
 </form>
-{% if let Some(t) = token %}<p class="hint">Setting up with an agent or a script? {% if token_env %}Use the setup token from OPENFAULT_SETUP_TOKEN{% else %}Use this one-time setup token: <code>{{ t }}</code>{% endif %} as <code>Authorization: Bearer …</code> for <code>POST /api/v1/setup</code> or the MCP endpoint <code>/mcp</code> (tool <code>setup_instance</code>). It stops working once the owner exists.</p>{% endif %}
+{% if let Some(t) = token %}<p class="hint">Setting up with an agent or a script? {% if token_env %}Use the setup token from OPENFAULT_SETUP_TOKEN as <code>Authorization: Bearer …</code>{% else %}Use this one-time setup token as <code>Authorization: Bearer …</code>{% endif %} for <code>POST /api/v1/setup</code> or the MCP endpoint <code>/mcp</code> (tool <code>setup_instance</code>). It stops working once the owner exists.</p>
+{% if !token_env %}<div class="copy"><pre><code class="token">{{ t }}</code></pre><button type="button" class="secondary sm" data-copy>{{ crate::ui::icon("copy")|safe }}Copy</button></div>{% endif %}{% endif %}
 {% endblock %}

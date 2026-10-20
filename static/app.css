@@ -212,7 +212,8 @@ td code{word-break:break-all}.num{text-align:right}
 .snip{position:relative}.snip button{position:absolute;right:8px;top:8px}
 dialog{--fill:var(--muted);border:var(--b);border-radius:var(--r-card);background:var(--popover);color:var(--popover-foreground);padding:24px;width:min(440px,calc(100vw - 32px));box-shadow:var(--shadow)}dialog::backdrop{background:rgba(0,0,0,.35);backdrop-filter:blur(2px)}
 dialog dl{display:grid;grid-template-columns:auto 1fr;gap:10px 16px;margin:16px 0}dialog dd{margin:0}
-.auth{width:calc(100% - 32px);max-width:400px;margin:12vh auto;padding:32px;border-radius:var(--r-card);background:var(--card);color:var(--card-foreground)}.auth .wordmark{margin-bottom:32px}.auth h1{margin-bottom:20px}
+.auth-wrap{min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:48px 16px;overflow:auto}.auth{width:100%;max-width:480px;margin:auto;padding:32px;border-radius:var(--r-card);background:var(--card);color:var(--card-foreground)}.auth .wordmark{margin-bottom:32px}.auth h1{margin-bottom:20px}
+.token{display:block;word-break:break-all;overflow-wrap:anywhere;padding:8px 12px;border-radius:var(--r-md);background:var(--muted);white-space:normal}.auth .copy{margin-top:12px}.auth .copy button{height:36px}
 .auth .stack button{align-self:stretch;height:36px}
 .err{text-align:center}.err .code{font:600 72px/1 var(--sans);letter-spacing:-.05em;color:var(--line-2);margin-bottom:12px}.err .btn{align-self:center}
 .cmt{gap:8px;margin-top:16px;max-width:640px}.cmt textarea{font:14px var(--sans)}
