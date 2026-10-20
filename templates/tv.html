@@ -4,7 +4,7 @@
 <script>document.documentElement.dataset.theme = "dark"</script>
 <div class="tv" hx-ext="sse" sse-connect="/live?scope={{ scope }}">
 <header class="tv-top">
-  <span class="wordmark"><span class="mark" aria-hidden="true"></span>OpenFault</span><span class="sep">/</span><span class="muted">{{ org }}{% if let Some(t) = title %} · {{ t }}{% endif %}</span>
+  <span class="wordmark">{% include "mark.svg.html" %}OpenFault</span><span class="sep">/</span><span class="muted">{{ org }}{% if let Some(t) = title %} · {{ t }}{% endif %}</span>
   <span class="live" id="live" title="Live updates">Live</span>
   <time class="clock" id="clock"></time>
 </header>

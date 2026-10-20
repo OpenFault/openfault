@@ -29,8 +29,7 @@ kbd{font-size:12px;border:var(--b);border-radius:var(--r-sm);padding:0 5px;color
 /* chrome */
 .top{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:12px;height:56px;padding:0 20px;background:color-mix(in oklch,var(--canvas) 80%,transparent);backdrop-filter:saturate(1.6) blur(14px);-webkit-backdrop-filter:saturate(1.6) blur(14px)}
 .wordmark{display:inline-flex;align-items:center;gap:8px;font-weight:600;font-size:15px;letter-spacing:-.03em}
-.mark{width:18px;height:18px;border-radius:5px;background:var(--fg);position:relative;overflow:hidden}
-.mark::after{content:"";position:absolute;left:4px;right:4px;top:8px;height:2px;background:var(--bg);transform:rotate(-35deg);box-shadow:0 0 6px var(--bg)}
+.mark{display:inline-block;width:18px;height:18px;color:currentColor;flex:none}
 .sep{color:var(--line-2)}
 .live{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--fg-3);margin-left:auto;white-space:nowrap}
 .live::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--fg-3);transition:background var(--t)}

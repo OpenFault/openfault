@@ -447,6 +447,16 @@ async fn icons_sprite_and_chart() {
     }
 }
 
+#[tokio::test]
+async fn login_shows_mark_and_favicon() {
+    let (app, _c, _db, _d) = admin_app().await;
+    let b = req(&app, "GET", "/login", "", "", FORM).await.body;
+    assert!(b.contains("<svg class=\"mark\""), "{b}");
+    assert!(b.contains("<link rel=\"icon\" type=\"image/svg+xml\" href=\"/static/mark.svg?v="));
+    let s = req(&app, "GET", "/static/mark.svg", "", "", FORM).await;
+    assert!(s.status == StatusCode::OK && s.body.contains("currentColor"));
+}
+
 #[test]
 fn css_uses_luma_preset() {
     let css = include_str!("../static/app.css");

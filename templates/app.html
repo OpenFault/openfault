@@ -4,7 +4,7 @@
 <input type="checkbox" id="nav-t" hidden><input type="checkbox" id="s-t" hidden>
 <div class="shell">
   <nav class="side" aria-label="Main">
-    <a class="brand" href="/"><span class="mark" aria-hidden="true"></span><span class="ell"><b>OpenFault</b>{% if !me.org.is_empty() %}<small>{{ me.org }}</small>{% endif %}</span></a>
+    <a class="brand" href="/">{% include "mark.svg.html" %}<span class="ell"><b>OpenFault</b>{% if !me.org.is_empty() %}<small>{{ me.org }}</small>{% endif %}</span></a>
     <div class="nav">
       <details class="grp" data-sec="overview" open><summary>{{ crate::ui::icon("caret-down")|safe }}Overview</summary>
         <a href="/"{% if me.path == "/" %} class="on" aria-current="page"{% endif %}>{{ crate::ui::icon("squares-four")|safe }}Dashboard</a>

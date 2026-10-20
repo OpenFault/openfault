@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="currentColor">
+<path transform="translate(-2.3 -2.4)" d="M40 6H20A14 14 0 0 0 6 20V44A14 14 0 0 0 20 58H24Z"></path>
+<path transform="translate(2.3 2.4)" d="M40 6H44A14 14 0 0 1 58 20V44A14 14 0 0 1 44 58H24Z"></path>
+</svg>
