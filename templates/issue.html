@@ -111,9 +111,9 @@
   {% for c in crumbs %}
     <li><span class="ic" aria-hidden="true">{{ crate::ui::icon(c.icon)|safe }}</span>
       <div><div class="sm"><b>{{ c.cat }}</b>{% if !c.level.is_empty() && c.level != "info" %} <span class="pill{% if c.level == "error" %} red{% endif %}">{{ c.level }}</span>{% endif %}</div>
-        {% if !c.msg.is_empty() %}<p class="data">{{ c.msg }}</p>{% endif %}
+        <p class="data{% if c.muted %} dim{% endif %}">{{ c.msg }}{% if !c.status.is_empty() %}<span{% if c.err %} class="error"{% endif %}>{{ c.status }}</span>{% endif %}</p>
         {% if let Some(dd) = c.data %}<details class="json"><summary>data</summary><pre class="data">{{ dd }}</pre></details>{% endif %}</div>
-      <span class="when">{{ c.when }}</span></li>
+      <span class="when"{% if !c.at.is_empty() %} title="{{ c.at }}"{% endif %}>{{ c.when }}</span></li>
   {% endfor %}
     <li><span class="ic crash">{{ crate::ui::icon("warning")|safe }}</span><div class="sm"><b>Crash</b></div><span class="when">0.0s</span></li>
   </ol>{% endif %}

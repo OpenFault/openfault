@@ -61,7 +61,11 @@ fn event(key: &str) -> String {
         "tags": {"route": XSS2},
         "breadcrumbs": {"values": [
             {"timestamp": 1.0, "category": "console", "message": format!("crumb {XSS1} {XSS2}")},
-            {"timestamp": 2.0, "category": "ui.click", "message": XSS2, "data": {"html": XSS1}}
+            {"timestamp": 2.0, "category": "ui.click", "message": XSS2, "data": {"html": XSS1}},
+            {"timestamp": 3.0, "category": "sql.active_record", "message": null, "level": null,
+             "data": {"sql": "SELECT \"users\".* FROM \"users\" WHERE \"id\" = $1", "name": "User Load"}},
+            {"timestamp": 4.0, "category": "net.http", "message": null, "data": {"method": "GET", "url": "https://api.test/x", "status": 502}},
+            {"timestamp": 5.0, "category": "active_support", "message": null}
         ]},
         "exception": {"values": [{
             "type": "TypeError",
@@ -179,6 +183,17 @@ async fn pages_actions_and_escaping() {
             b.contains("outerHTML transition:true") && b.matches(r#"class="ind""#).count() == 1
         );
     }
+    let b = ok(format!("/issues/{id}?tab=breadcrumbs")).await;
+    assert!(
+        b.contains("User Load SELECT &#34;users&#34;.* FROM &#34;users&#34;"),
+        "sql summary"
+    );
+    assert!(b.contains(r#"GET https://api.test/x<span class="error"> → 502</span>"#));
+    assert!(
+        b.contains("(no message)")
+            && !b.contains(">null<")
+            && b.contains("title=\"1970-01-01T00:00:03Z\"")
+    );
     let ev = ok(format!(
         "/issues/{id}/events/0a1b2c3d4e5f4a6b8c9d0e1f2a3b4c5d"
     ))

@@ -577,8 +577,14 @@ pub struct Crumb {
     pub icon: &'static str,
     pub cat: String,
     pub msg: String,
+    /// "(no message)" placeholder, rendered muted
+    pub muted: bool,
+    /// http status suffix; `err` = status >= 400
+    pub status: String,
+    pub err: bool,
     pub level: String,
     pub when: String,
+    pub at: String,
     pub data: Option<String>,
 }
 pub struct Req {
@@ -690,6 +696,52 @@ fn exceptions(ev: &EventDetail, raw: bool) -> Vec<ExcV> {
         .collect()
 }
 
+/// Non-empty string form; null / "null" / "None" count as absent.
+fn opt(v: Option<&Value>) -> Option<String> {
+    let v = s(v.filter(|v| !v.is_null())?);
+    (!v.is_empty() && v != "null" && v != "None").then_some(v)
+}
+
+/// Summary line for a crumb without a message, derived from its data (sentry-rails etc.).
+fn summary(cat: &str, d: &Value) -> Option<(String, String, bool)> {
+    let g = |k: &str| opt(d.get(k));
+    if let Some(sql) = g("sql") {
+        let mut t: String = sql.chars().take(160).collect();
+        if sql.chars().count() > 160 {
+            t.push('…');
+        }
+        return Some((
+            g("name").map_or(t.clone(), |n| format!("{n} {t}")),
+            "".into(),
+            false,
+        ));
+    }
+    if let (Some(n), Some(c)) = (g("record_count"), g("class_name")) {
+        return Some((format!("{n} × {c}"), "".into(), false));
+    }
+    if cat.starts_with("cache") {
+        let hit = d.get("hit").and_then(Value::as_bool);
+        let h = hit.map_or("", |h| if h { " hit" } else { " miss" });
+        return g("key").map(|k| (format!("{k}{h}"), "".into(), false));
+    }
+    if let (Some(m), Some(u)) = (g("method"), g("url")) {
+        let code = d.get("status_code").or(d.get("status"));
+        let st = opt(code).map_or(String::new(), |c| format!(" → {c}"));
+        let err = code.and_then(|c| c.as_i64().or_else(|| c.as_str()?.parse().ok())) >= Some(400);
+        return Some((format!("{m} {u}"), st, err));
+    }
+    if let (Some(f), Some(t)) = (g("from"), g("to")) {
+        return Some((format!("{f} → {t}"), "".into(), false));
+    }
+    g("message")
+        .or_else(|| {
+            d.as_object()?
+                .values()
+                .find_map(|v| opt(Some(v).filter(|v| v.is_string())))
+        })
+        .map(|m| (m, "".into(), false))
+}
+
 fn crumbs(ev: &EventDetail) -> Vec<Crumb> {
     let crash = ev.timestamp as f64;
     ev.breadcrumbs
@@ -716,12 +768,27 @@ fn crumbs(ev: &EventDetail) -> Vec<Crumb> {
                     format!("{:+.1}m", d / 60.0)
                 }
             });
+            let at = ts(b.get("timestamp"))
+                .and_then(|t| jiff::Timestamp::from_millisecond((t * 1000.0) as i64).ok())
+                .map_or(String::new(), |t| t.to_string());
+            let (msg, status, err) = opt(b.get("message"))
+                .map(|m| (m, String::new(), false))
+                .or_else(|| summary(&cat, b.get("data")?))
+                .unwrap_or_default();
             Crumb {
                 icon,
+                muted: msg.is_empty(),
+                msg: if msg.is_empty() {
+                    "(no message)".into()
+                } else {
+                    msg
+                },
+                status,
+                err,
                 cat,
-                msg: b.get("message").map(s).unwrap_or_default(),
-                level: b.get("level").map(s).unwrap_or_default(),
+                level: opt(b.get("level")).unwrap_or_default(),
                 when,
+                at,
                 data: b.get("data").filter(|d| !d.is_null()).map(pretty),
             }
         })
