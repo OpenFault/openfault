@@ -326,7 +326,7 @@ async fn issue(
     let ex = q.expand.unwrap_or_default();
     let mut ex: Vec<&str> = ex.split(',').map(str::trim).collect();
     let gated = |k: &&str| GATED.contains(k);
-    if ex.iter().any(gated) && !approved(&st, id).await? {
+    if ex.iter().any(gated) && !approved(&st, &s, id).await? {
         ex.retain(|k| !gated(k));
         return Ok(Json(not_approved(issue_json(&st, id, &ex).await?)));
     }
@@ -335,7 +335,23 @@ async fn issue(
 
 const GATED: [&str; 4] = ["frames", "breadcrumbs", "request", "events"];
 
-async fn approved(st: &AppState, issue_id: i64) -> R<bool> {
+/// A paired phone is a person, not an agent: it sees full details. Other tokens need fix approval.
+async fn approved(st: &AppState, s: &Scope, issue_id: i64) -> R<bool> {
+    let tid = s.token.id;
+    let device: bool = st
+        .db
+        .read(move |c| {
+            c.query_row(
+                "SELECT EXISTS(SELECT 1 FROM devices WHERE token_id = ?1)",
+                [tid],
+                |r| r.get(0),
+            )
+        })
+        .await
+        .map_err(internal)?;
+    if device {
+        return Ok(true);
+    }
     issues::fix_approved(&st.db, issue_id)
         .await
         .map_err(internal)
@@ -354,7 +370,7 @@ async fn markdown(s: Scope, State(st): State<AppState>, Path(id): Path<i64>) -> 
         .await
         .map_err(internal)?
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "issue not found"))?;
-    let md = crate::ui::issue_markdown(&d, approved(&st, id).await?);
+    let md = crate::ui::issue_markdown(&d, approved(&st, &s, id).await?);
     Ok(([(header::CONTENT_TYPE, "text/markdown; charset=utf-8")], md).into_response())
 }
 
@@ -448,7 +464,7 @@ async fn event(
         .map_err(internal)?
         .filter(|e| s.ids().contains(&e.project_id))
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "event not found"))?;
-    if !approved(&st, e.issue_id).await? {
+    if !approved(&st, &s, e.issue_id).await? {
         let mut v = safe(e);
         for k in ["breadcrumbs", "request", "raw"] {
             v.as_object_mut().map(|o| o.remove(k));

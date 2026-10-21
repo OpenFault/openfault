@@ -80,6 +80,15 @@ async fn start_claim_and_single_use() {
         .await,
         1
     );
+    // a paired phone is a person: full details without fix approval (MCP/other tokens stay gated).
+    post_fixture(&t, "node_exception.envelope", 1).await;
+    wait_processed(&t.db).await;
+    let iid = q(&t.db, "SELECT max(id) FROM issues").await;
+    let uri = format!("/api/v1/issues/{iid}?expand=frames,breadcrumbs");
+    let (_, g) = req(&t, "GET", &uri, tok, None).await;
+    assert!(g.get("fix_approved").is_none(), "{g}");
+    let (_, g) = req(&t, "GET", &uri, MEMBER_W, None).await;
+    assert_eq!(g["fix_approved"], false);
 
     let (s, e) = claim(&t, code, None).await;
     assert_eq!(s, StatusCode::NOT_FOUND);
