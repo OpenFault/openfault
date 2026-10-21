@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="static/mark.svg#gh-light-mode-only" alt="OpenFault" width="56" height="56"><img src="static/mark-dark.svg#gh-dark-mode-only" alt="OpenFault" width="56" height="56">
+  <picture><source media="(prefers-color-scheme: dark)" srcset="static/mark-dark.svg"><img src="static/mark.svg" alt="OpenFault" width="56" height="56"></picture>
 </p>
 
 <h1 align="center">OpenFault</h1>
@@ -66,15 +66,15 @@ Pull requests are welcome. Small ones merge fast. Start with [CONTRIBUTING.md](C
 
 <p align="center">
   <a href="https://featureos.com">
-    <img src="static/sponsors/featureos.svg#gh-light-mode-only" alt="FeatureOS" height="20"><img src="static/sponsors/featureos-dark.svg#gh-dark-mode-only" alt="FeatureOS" height="20">
+    <picture><source media="(prefers-color-scheme: dark)" srcset="static/sponsors/featureos-dark.svg"><img src="static/sponsors/featureos.svg" alt="FeatureOS" height="20"></picture>
   </a>
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://supportwire.ai">
-    <img src="static/sponsors/supportwire.svg#gh-light-mode-only" alt="SupportWire" height="26"><img src="static/sponsors/supportwire-dark.svg#gh-dark-mode-only" alt="SupportWire" height="26">
+    <picture><source media="(prefers-color-scheme: dark)" srcset="static/sponsors/supportwire-dark.svg"><img src="static/sponsors/supportwire.svg" alt="SupportWire" height="26"></picture>
   </a>
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://www.skcript.com">
-    <img src="static/sponsors/skcript.svg#gh-light-mode-only" alt="Skcript" height="28"><img src="static/sponsors/skcript-dark.svg#gh-dark-mode-only" alt="Skcript" height="28">
+    <picture><source media="(prefers-color-scheme: dark)" srcset="static/sponsors/skcript-dark.svg"><img src="static/sponsors/skcript.svg" alt="Skcript" height="28"></picture>
   </a>
 </p>
 
