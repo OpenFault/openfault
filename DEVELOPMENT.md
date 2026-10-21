@@ -98,7 +98,7 @@ cargo run -- relay
 
 ## Other repos
 
-- [openfault-ios](https://github.com/OpenFault/openfault-ios): the iOS app and widgets. Generate the project with `xcodegen generate`, then build the `OpenFault` scheme in Xcode.
+- openfault-ios (private until the App Store launch): the iOS app and widgets. Generate the project with `xcodegen generate`, then build the `OpenFault` scheme in Xcode.
 - [openfault.dev](https://github.com/OpenFault/openfault.dev): the docs site (Astro). `bun install && bun run dev`.
 
 ## Where things live
