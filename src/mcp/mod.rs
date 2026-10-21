@@ -885,6 +885,7 @@ impl Mcp {
             .await
             .map_err(e)?;
         let (pid, key) = made.ok_or_else(|| format!("project '{slug}' already exists"))?;
+        crate::live::changed(&self.st.db, 0);
         let base = crate::config::base_or(&self.st.db, host(&p));
         Ok(format!(
             "Created {slug}. DSN: {}",
@@ -1029,6 +1030,7 @@ impl Mcp {
                 })
                 .await
                 .map_err(e)?;
+            crate::live::changed(&self.st.db, 0);
             done.push(format!("added project {slug}"));
         }
         if done.is_empty() {

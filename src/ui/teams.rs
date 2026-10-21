@@ -129,6 +129,7 @@ async fn delete(me: Me, State(st): State<AppState>, Path(slug): Path<String>) ->
     st.db
         .write(move |c| c.execute("DELETE FROM teams WHERE id = ?1", [t.id]))
         .await?;
+    crate::live::changed(&st.db, 0);
     flash("/settings/teams", "Team deleted")
 }
 
@@ -148,6 +149,7 @@ async fn set_member(
     st.db
         .write(move |c| teams::set_member(c, t.id, f.user_id, &f.role))
         .await?;
+    crate::live::changed(&st.db, 0);
     flash(&format!("/settings/teams/{slug}"), "Member saved")
 }
 
@@ -165,6 +167,7 @@ async fn remove_member(
             )
         })
         .await?;
+    crate::live::changed(&st.db, 0);
     flash(&format!("/settings/teams/{slug}"), "Member removed")
 }
 
@@ -191,6 +194,7 @@ async fn add_project(
             )
         })
         .await?;
+    crate::live::changed(&st.db, 0);
     flash(&format!("/settings/teams/{slug}"), "Project added")
 }
 
@@ -208,5 +212,6 @@ async fn remove_project(
             )
         })
         .await?;
+    crate::live::changed(&st.db, 0);
     flash(&format!("/settings/teams/{slug}"), "Project removed")
 }

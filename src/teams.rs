@@ -289,6 +289,7 @@ async fn api_rename(
         })
         .await
         .map_err(ie)?;
+    crate::live::changed(&st.db, 0);
     Ok(Json(json!({"ok": true})))
 }
 
@@ -299,6 +300,7 @@ async fn api_delete(s: Scope, State(st): State<AppState>, Path(slug): Path<Strin
         .write(move |c| c.execute("DELETE FROM teams WHERE id = ?1", [t.id]))
         .await
         .map_err(ie)?;
+    crate::live::changed(&st.db, 0);
     Ok(Json(json!({"ok": true})))
 }
 
@@ -346,6 +348,7 @@ pub async fn add_member(
     if n == 0 {
         return Err("no org member with that email; invite them first".into());
     }
+    crate::live::changed(db, 0);
     Ok(())
 }
 
@@ -366,6 +369,7 @@ async fn api_remove_member(
         })
         .await
         .map_err(ie)?;
+    crate::live::changed(&st.db, 0);
     Ok(Json(json!({"ok": true})))
 }
 
@@ -401,6 +405,7 @@ async fn api_add_project(
         })
         .await
         .map_err(ie)?;
+    crate::live::changed(&st.db, 0);
     Ok(Json(json!({"ok": true})))
 }
 async fn api_remove_project(
@@ -420,6 +425,7 @@ async fn api_remove_project(
         })
         .await
         .map_err(ie)?;
+    crate::live::changed(&st.db, 0);
     Ok(Json(json!({"ok": true})))
 }
 

@@ -106,6 +106,14 @@ async fn ticks_scope_and_summary() {
     .unwrap();
     assert_eq!(next(&mut s, &mut buf, "tick").await["kind"], "resolved");
 
+    // non-issue change (project/member/team) → bare tick on every scope, issue streams included
+    let res = get(&t, &format!("/live?scope=issue:{id}"), &member).await;
+    let (mut s2, mut b2) = (res.into_body().into_data_stream(), String::new());
+    next(&mut s2, &mut b2, "hello").await;
+    openfault::live::changed(&t.db, 0);
+    assert_eq!(next(&mut s, &mut buf, "tick").await["kind"], "changed");
+    assert_eq!(next(&mut s2, &mut b2, "tick").await["kind"], "changed");
+
     // no session → redirect, never a stream
     assert_eq!(
         get(&t, "/live?scope=all", "").await.status(),

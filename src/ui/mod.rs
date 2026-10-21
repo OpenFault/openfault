@@ -1209,6 +1209,7 @@ async fn accept_invite(
             Ok(Some(uid))
         })
         .await?;
+    crate::live::changed(&st.db, 0);
     match uid {
         Some(uid) => with_cookie("/", auth::login(&st, uid).await?),
         None => expired(),
@@ -1436,6 +1437,7 @@ pub(crate) async fn create_invite(
             .map(|_| false)
         })
         .await?;
+    crate::live::changed(&st.db, 0);
     if existing {
         return Ok(None);
     }
@@ -1484,6 +1486,7 @@ async fn set_role(
             )
         })
         .await?;
+    crate::live::changed(&st.db, 0);
     flash("/settings/members", "Role updated")
 }
 
@@ -1492,6 +1495,7 @@ async fn remove_member(me: Me, State(st): State<AppState>, Path(id): Path<i64>) 
     st.db
         .write(move |c| c.execute("DELETE FROM users WHERE id = ?1 AND role != 'owner'", [id]))
         .await?;
+    crate::live::changed(&st.db, 0);
     flash("/settings/members", "Member removed")
 }
 
@@ -1535,6 +1539,9 @@ async fn create_project(me: Me, State(st): State<AppState>, Form(f): Form<Projec
             insert_project(c, f.name.trim(), &s2, platform(&f.platform)).map(|_| true)
         })
         .await?;
+    if created {
+        crate::live::changed(&st.db, 0);
+    }
     if !created {
         let projects = visible_projects(&st, &me).await?;
         let error = Some(format!("A project with slug \"{slug}\" already exists."));
@@ -1663,6 +1670,7 @@ async fn save_project(
             )
         })
         .await?;
+    crate::live::changed(&st.db, p.id);
     flash(&format!("/settings/projects/{slug}"), "Project saved")
 }
 

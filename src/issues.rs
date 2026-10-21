@@ -840,7 +840,7 @@ pub async fn apply_action(
                     }
                     tx.execute("DELETE FROM issues WHERE id = ?1", [issue_id])?;
                     tx.commit()?;
-                    return Ok(Some(None));
+                    return Ok(Some(Some(crate::live::LiveEvent::new(pid, issue_id, &title, &level, "deleted", t))));
                 }
             }
             tx.execute(
@@ -853,7 +853,8 @@ pub async fn apply_action(
                 IssueAction::Mute { .. } => "muted",
                 IssueAction::Unresolve | IssueAction::Unmute => "unresolved",
                 IssueAction::Approve => "approved",
-                _ => return Ok(Some(None)),
+                // assign/comment/link-fix/unapprove: generic refetch tick so open detail screens update
+                _ => "updated",
             };
             Ok(Some(Some(crate::live::LiveEvent::new(pid, issue_id, &title, &level, live, t))))
         })

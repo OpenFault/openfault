@@ -59,6 +59,13 @@ impl LiveEvent {
     }
 }
 
+/// Non-issue change (project/member/team) → a bare refetch tick. `pid` 0 = every stream.
+pub fn changed(db: &crate::db::Db, pid: i64) {
+    let _ = db
+        .live
+        .send(LiveEvent::new(pid, 0, "", "", "changed", now()));
+}
+
 static SLOTS: Semaphore = Semaphore::const_new(256);
 const WINDOW: Duration = Duration::from_millis(500);
 
@@ -155,9 +162,13 @@ async fn live(State(st): State<AppState>, u: Viewer, Query(q): Query<ScopeQ>) ->
     };
     // ponytail: visibility is computed once per connection; a revoked member keeps ticks until reconnect.
     let pids: HashSet<i64> = pids.into_iter().collect();
-    let matches = move |e: &LiveEvent| match scope {
-        Scope::Issue(i) => e.issue_id == i,
-        _ => pids.contains(&e.project_id),
+    let matches = move |e: &LiveEvent| {
+        // issue_id 0 = `changed()`: reaches every scope of that project (pid 0 = all streams)
+        (e.issue_id == 0 && (e.project_id == 0 || pids.contains(&e.project_id)))
+            || match scope {
+                Scope::Issue(i) => e.issue_id == i,
+                _ => pids.contains(&e.project_id),
+            }
     };
     let rx = st.db.live.subscribe();
     let hello = Event::default()
