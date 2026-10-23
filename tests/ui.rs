@@ -709,7 +709,7 @@ async fn settings_devices_pairing_flow() {
     assert_eq!(r.status, StatusCode::OK);
     assert!(r.body.starts_with("<div id=\"devs\" hx-get") && r.body.contains("<svg class=\"qr\""));
 
-    let claimed = openfault::pairing::claim(&st, &code, "ios", "Ann's iPhone", None)
+    let claimed = openfault::pairing::claim(&st, Some(&code), "ios", "Ann's iPhone", None)
         .await
         .ok()
         .unwrap();

@@ -108,9 +108,10 @@ pub struct Claimed {
 }
 
 /// Invalid, expired, used and cancelled codes all answer the same 404.
+/// `code: None` is the public demo pairing: mints for the `OPENFAULT_DEMO_USER` email instead (404 if unset/unknown).
 pub async fn claim(
     st: &AppState,
-    code: &str,
+    code: Option<&str>,
     platform: &str,
     device_name: &str,
     push_token: Option<String>,
@@ -125,21 +126,27 @@ pub async fn claim(
         return Err(ae(StatusCode::UNPROCESSABLE_ENTITY, "invalid push_token"));
     }
     let token = new_api_token();
-    let (h, th, t) = (code_hash(code), hash_token(&token), now());
+    let (h, th, t) = (code.map(code_hash), hash_token(&token), now());
+    let demo = std::env::var("OPENFAULT_DEMO_USER").unwrap_or_default();
     let (platform, label) = (platform.to_string(), format!("iOS: {device_name}"));
     let name = device_name.to_string();
     let r = st
         .db
         .write(move |c| {
             let tx = c.transaction()?;
-            let Some(uid) = tx
-                .query_row(
+            let uid = match &h {
+                Some(h) => tx.query_row(
                     "SELECT user_id FROM pairings WHERE code_hash = ?1 AND claimed_at IS NULL AND expires_at > ?2",
                     params![h, t],
                     |r| r.get::<_, i64>(0),
-                )
-                .optional()?
-            else {
+                ),
+                None => tx.query_row(
+                    "SELECT id FROM users WHERE email = ?1 AND ?1 != ''",
+                    [&demo],
+                    |r| r.get(0),
+                ),
+            };
+            let Some(uid) = uid.optional()? else {
                 return Ok(None);
             };
             let tid: i64 = tx.query_row(
@@ -147,10 +154,12 @@ pub async fn claim(
                 params![th, uid, label],
                 |r| r.get(0),
             )?;
-            tx.execute(
-                "UPDATE pairings SET claimed_at = ?2, token_id = ?3 WHERE code_hash = ?1",
-                params![h, t, tid],
-            )?;
+            if let Some(h) = &h {
+                tx.execute(
+                    "UPDATE pairings SET claimed_at = ?2, token_id = ?3 WHERE code_hash = ?1",
+                    params![h, t, tid],
+                )?;
+            }
             // re-pairing the same phone: revoke the token its previous pairing minted (NULL token matches nothing).
             tx.execute(
                 "DELETE FROM api_tokens WHERE id = (SELECT token_id FROM devices WHERE user_id = ?1 AND push_token = ?2)",
@@ -202,6 +211,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/pair/start", post(start))
         .route("/pair/claim", post(claim_route))
+        .route("/pair/demo", post(demo_route))
         .route("/pair/{code}", delete(cancel))
         // session-cookie callers: same cross-site guard as the web UI.
         .route_layer(middleware::from_fn(crate::auth::csrf))
@@ -260,6 +270,7 @@ async fn cancel(
 
 #[derive(Deserialize)]
 struct ClaimReq {
+    #[serde(default)]
     code: String,
     platform: String,
     device_name: String,
@@ -279,10 +290,29 @@ fn client_key(h: &HeaderMap, peer: Peer) -> String {
 }
 
 async fn claim_route(
+    st: State<AppState>,
+    peer: Peer,
+    h: HeaderMap,
+    b: Json<ClaimReq>,
+) -> Result<Json<Claimed>, ApiErr> {
+    limited_claim(st, peer, h, b, false).await
+}
+
+async fn demo_route(
+    st: State<AppState>,
+    peer: Peer,
+    h: HeaderMap,
+    b: Json<ClaimReq>,
+) -> Result<Json<Claimed>, ApiErr> {
+    limited_claim(st, peer, h, b, true).await
+}
+
+async fn limited_claim(
     State(st): State<AppState>,
     peer: Peer,
     h: HeaderMap,
     Json(b): Json<ClaimReq>,
+    demo: bool,
 ) -> Result<Json<Claimed>, ApiErr> {
     let key = client_key(&h, peer);
     let t = now();
@@ -302,7 +332,8 @@ async fn claim_route(
             ));
         }
     }
-    let r = claim(&st, &b.code, &b.platform, &b.device_name, b.push_token).await;
+    let code = (!demo).then_some(b.code.as_str());
+    let r = claim(&st, code, &b.platform, &b.device_name, b.push_token).await;
     if matches!(r, Err(ApiErr(StatusCode::NOT_FOUND, _))) {
         st.attempts.lock().unwrap().entry(key).or_insert((0, t)).0 += 1;
     }

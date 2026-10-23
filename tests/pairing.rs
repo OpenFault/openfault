@@ -203,3 +203,24 @@ async fn device_patch_and_delete_revokes_token() {
         StatusCode::UNAUTHORIZED
     );
 }
+
+#[tokio::test]
+async fn demo_pairing_gated_by_env() {
+    let t = setup().await;
+    let body = json!({"platform": "ios", "device_name": "Reviewer"}).to_string();
+    unsafe { std::env::remove_var("OPENFAULT_DEMO_USER") };
+    let (s, _) = req(&t, "POST", "/api/v1/pair/demo", "", Some(body.clone())).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    unsafe { std::env::set_var("OPENFAULT_DEMO_USER", "m@x.io") };
+    let (s, c) = req(&t, "POST", "/api/v1/pair/demo", "", Some(body)).await;
+    unsafe { std::env::remove_var("OPENFAULT_DEMO_USER") };
+    assert_eq!(s, StatusCode::OK, "{c}");
+    assert_eq!(c["user"]["email"], "m@x.io");
+    let (s, me) = req(&t, "GET", "/api/v1/me", c["token"].as_str().unwrap(), None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(me["token"]["scopes"], "write");
+    // the claim route still requires a code.
+    let nocode = json!({"platform": "ios", "device_name": "x"}).to_string();
+    let (s, _) = req(&t, "POST", "/api/v1/pair/claim", "", Some(nocode)).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+}

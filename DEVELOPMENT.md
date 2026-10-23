@@ -39,6 +39,7 @@ All optional. Settings in the UI cover most of these; env wins when set.
 | `OPENFAULT_SMTP_URL` | `smtp://user:pass@host:587?from=...` (`smtps://` for TLS). |
 | `OPENFAULT_PUSH_RELAY_URL`, `OPENFAULT_PUSH_RELAY_TOKEN` | Push relay for iOS notifications. |
 | `OPENFAULT_BACKUP_S3_*` | S3/R2 backup settings (`_ENDPOINT`, `_REGION`, `_BUCKET`, `_PREFIX`, `_ACCESS_KEY`, `_SECRET_KEY`, `_HOUR`, `_KEEP`). |
+| `OPENFAULT_DEMO_USER` | Email of an existing user; enables public `POST /api/v1/pair/demo` (one-tap app pairing as that user, e.g. for App Review). |
 | `OPENFAULT_TRUST_PROXY` | `1` trusts `X-Forwarded-For` behind a reverse proxy. |
 | `OPENFAULT_ALLOW_PRIVATE_WEBHOOKS` | `1` allows webhooks to localhost and private IPs. |
 | `OPENFAULT_DEV_DSN_KEY` | Debug builds only: seed the `dev` project. |
