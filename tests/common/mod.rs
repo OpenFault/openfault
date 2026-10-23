@@ -61,6 +61,22 @@ pub async fn post_fixture(t: &T, name: &str, project: i64) {
         .unwrap()
         .to_string();
     let body = raw.replace(&old, &uuid::Uuid::now_v7().simple().to_string());
+    // Fixtures carry a fixed SDK clock that ages out of "last 24h" ranges; pin it to now.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let body = body
+        .lines()
+        .map(|l| match serde_json::from_str::<Value>(l) {
+            Ok(mut v) if v.get("timestamp").is_some() => {
+                v["timestamp"] = now.into();
+                v.to_string()
+            }
+            _ => l.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     let key = if project == 1 { KEY } else { KEY2 };
     let (s, _) = req(
         t,
