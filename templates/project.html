@@ -39,6 +39,22 @@
     <button>Save</button>
   </form>
 </section>
+<section class="card sec">
+  <h2>Debug files</h2>
+  {% if dsyms.is_empty() %}<p class="muted">No dSYMs uploaded yet. See the README's iOS crash symbolication section.</p>{% else %}
+  <div class="tbl"><table class="rt">
+  <thead><tr><th>Debug ID</th><th class="num">Size</th><th>Uploaded</th><th></th></tr></thead>
+  <tbody>
+  {% for d in dsyms %}
+  <tr>
+    <td><code>{{ d.0 }}</code></td><td class="num muted">{{ (d.1 + 1023) / 1024 }} KB</td><td class="muted">{{ crate::ui::t(d.2)|safe }}</td>
+    <td class="num"><form method="post" action="/settings/projects/{{ project.slug }}/dsyms/{{ d.0 }}/delete" class="inline"><button class="ghost sm danger" aria-label="Delete debug file">{{ crate::ui::icon("trash")|safe }}</button></form></td>
+  </tr>
+  {% endfor %}
+  </tbody>
+  </table></div>
+  {% endif %}
+</section>
 {% endif %}
 <section class="card sec">
   <h2>Teams</h2>
