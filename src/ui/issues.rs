@@ -676,7 +676,10 @@ fn exceptions(ev: &EventDetail, raw: bool) -> Vec<ExcV> {
         .map(|e| {
             let any_app = e.frames.iter().any(|f| f.in_app);
             let mut groups: Vec<Group> = vec![];
-            for f in e.frames.iter().rev() {
+            // Raw view hides frames synthesized from inline info (symbolicate.rs marks them).
+            let shown =
+                |f: &&svc::Frame| !raw || f.raw.as_ref().is_none_or(|r| r["inlined"] != true);
+            for f in e.frames.iter().rev().filter(shown) {
                 let vendor = any_app && !f.in_app;
                 match groups.last_mut() {
                     Some(g) if vendor && g.vendor => g.frames.push(frame_v(f, raw)),
