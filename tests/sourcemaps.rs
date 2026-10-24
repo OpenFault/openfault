@@ -132,6 +132,21 @@ async fn upload_then_symbolicate() {
     // a member outside the project cannot write to it.
     let (s, _) = call_as(&app, MEMBER_TOKEN, "POST", dsyms, ct, mp).await;
     assert_eq!(s, StatusCode::NOT_FOUND);
+    // a gzip body passes the 20 MiB wire cap but inflates past it: 413 after decoding, not buffered.
+    let mut big = b"--XX\r\nContent-Disposition: form-data; name=\"file\"\r\n\r\n".to_vec();
+    big.resize(big.len() + (21 << 20), 0);
+    let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    gz.write_all(&big).unwrap();
+    let req = Request::builder()
+        .method("POST")
+        .uri(dsyms)
+        .header("authorization", format!("Bearer {TOKEN}"))
+        .header("content-type", ct)
+        .header("content-encoding", "gzip")
+        .body(Body::from(gz.finish().unwrap()))
+        .unwrap();
+    let s = app.clone().oneshot(req).await.unwrap().status();
+    assert_eq!(s, StatusCode::PAYLOAD_TOO_LARGE);
 
     let (s, j) = call(&app, "GET", &format!("{ORG}/chunk-upload/"), "", vec![]).await;
     assert_eq!(s, StatusCode::OK);

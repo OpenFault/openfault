@@ -103,14 +103,7 @@ async fn dsyms(
     Path(p): Path<HashMap<String, String>>,
     req: Request,
 ) -> Result<Json<Value>, (StatusCode, String)> {
-    let bad = |e: multer::Error| (StatusCode::BAD_REQUEST, e.to_string());
-    let ct = req
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or_default();
-    let boundary = multer::parse_boundary(ct).map_err(bad)?;
-    let mut mp = multer::Multipart::new(req.into_body().into_data_stream(), boundary);
+    let mut mp = multipart(req)?;
     let mut data = None;
     while let Some(f) = mp.next_field().await.map_err(bad)? {
         if f.name() == Some("file") {
@@ -157,6 +150,30 @@ async fn dsyms(
         .await
         .map_err(e500)??;
     Ok(Json(Value::Array(out)))
+}
+
+/// Multipart over the decoded body, capped at MAX_BODY: a gzip body passes the wire cap and would inflate to 100 MiB.
+fn multipart(req: Request) -> Result<multer::Multipart<'static>, (StatusCode, String)> {
+    let ct = req
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    let boundary = multer::parse_boundary(ct).map_err(bad)?;
+    let limit = multer::SizeLimit::new().whole_stream(crate::MAX_BODY as u64);
+    Ok(multer::Multipart::with_constraints(
+        req.into_body().into_data_stream(),
+        boundary,
+        multer::Constraints::new().size_limit(limit),
+    ))
+}
+
+fn bad(e: multer::Error) -> (StatusCode, String) {
+    let s = match e {
+        multer::Error::StreamSizeExceeded { .. } => StatusCode::PAYLOAD_TOO_LARGE,
+        _ => StatusCode::BAD_REQUEST,
+    };
+    (s, e.to_string())
 }
 
 /// Zip of dSYMs (or a bare Mach-O/fat file) → its debug files.
@@ -232,14 +249,7 @@ fn sha1_hex(b: &[u8]) -> String {
 }
 
 async fn chunk_upload(_: W, State(st): State<AppState>, req: Request) -> R {
-    let bad = |e: multer::Error| (StatusCode::BAD_REQUEST, e.to_string());
-    let ct = req
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or_default();
-    let boundary = multer::parse_boundary(ct).map_err(bad)?;
-    let mut mp = multer::Multipart::new(req.into_body().into_data_stream(), boundary);
+    let mut mp = multipart(req)?;
     let mut chunks = vec![];
     while let Some(f) = mp.next_field().await.map_err(bad)? {
         let name = f.file_name().unwrap_or_default().to_lowercase();

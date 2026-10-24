@@ -56,6 +56,8 @@ impl AppState {
 }
 
 const MIB: usize = 1 << 20;
+/// Max request body on the wire, and max decoded multipart upload (sourcemaps).
+pub(crate) const MAX_BODY: usize = 20 * MIB;
 
 pub fn app(state: AppState) -> Router {
     Router::new()
@@ -74,7 +76,7 @@ pub fn app(state: AppState) -> Router {
         .layer(RequestBodyLimitLayer::new(100 * MIB)) // decompressed
         .layer(RequestDecompressionLayer::new())
         .layer(axum::middleware::from_fn(content_encoding))
-        .layer(RequestBodyLimitLayer::new(20 * MIB)) // compressed, on the wire
+        .layer(RequestBodyLimitLayer::new(MAX_BODY)) // compressed, on the wire
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
