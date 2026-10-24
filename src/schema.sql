@@ -77,6 +77,11 @@ CREATE TABLE IF NOT EXISTS artifact_bundles (
   id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, debug_id TEXT NOT NULL,
   minified_cache BLOB, map_cache BLOB, created_at INTEGER NOT NULL);
 CREATE UNIQUE INDEX IF NOT EXISTS artifact_bundles_debug ON artifact_bundles(project_id, debug_id);
+-- native (dSYM) SymCaches, see src/sourcemaps dsyms().
+CREATE TABLE IF NOT EXISTS debug_files (
+  id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, debug_id TEXT NOT NULL,
+  symcache BLOB NOT NULL, created_at INTEGER NOT NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS debug_files_debug ON debug_files(project_id, debug_id);
 -- sentry-cli chunk-upload staging; rows are deleted once assembled.
 CREATE TABLE IF NOT EXISTS chunks (sha1 TEXT PRIMARY KEY, data BLOB NOT NULL, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS devices (
