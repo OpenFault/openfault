@@ -50,5 +50,14 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # registry cache: the 10GB GHA cache is full (rust-cache PR entries) and evicts these layers
+          cache-from: type=registry,ref=ghcr.io/openfault/openfault:buildcache
+          cache-to: type=registry,ref=ghcr.io/openfault/openfault:buildcache,mode=max,image-manifest=true,oci-mediatypes=true
+
+  deploy:
+    needs: image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - run: >-
+          curl -fsS -X POST -H "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}" "https://cd.skcript.com/api/v1/deploy?uuid=otx4lknrfrc1nkoy9ibdkqhp&force=true"
