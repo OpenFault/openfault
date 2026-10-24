@@ -169,9 +169,14 @@ fn native(c: &Connection, pid: i64, ev: &mut Value) {
                 .and_then(Value::as_array_mut);
             let Some(frames) = frames else { continue };
             let n = frames.len();
-            for (i, f) in frames.iter_mut().enumerate() {
-                changed |= native_frame(c, pid, &images, f, i + 1 == n).is_some();
+            let mut out = Vec::with_capacity(n);
+            for (i, mut f) in std::mem::take(frames).into_iter().enumerate() {
+                let inl = native_frame(c, pid, &images, &mut f, i + 1 == n);
+                changed |= inl.is_some();
+                out.push(f);
+                out.extend(inl.into_iter().flatten());
             }
+            *frames = out;
         }
     }
     if changed {
@@ -179,13 +184,16 @@ fn native(c: &Connection, pid: i64, ev: &mut Value) {
     }
 }
 
+/// Symbolicates `f` as the outermost function at its address and returns the frames inlined into
+/// it, ordered outer→inner to match the oldest-first array (crash last). Inlined frames clone `f`
+/// (address, in_app, raw) and carry `raw.inlined = true` so the Raw view can drop them.
 fn native_frame(
     c: &Connection,
     pid: i64,
     images: &[(u64, u64, String)],
     f: &mut Value,
     innermost: bool,
-) -> Option<()> {
+) -> Option<Vec<Value>> {
     let (id, addr) = rel_addr(images, hex(&f["instruction_addr"])?, innermost)?;
     let b = blob(
         c,
@@ -194,10 +202,30 @@ fn native_frame(
         id,
     )?;
     let cache = SymCache::parse(&b).ok()?;
-    // shortcut: inlined frames collapse to the outermost caller; expand them if inline detail is wanted.
-    let loc = cache.lookup(addr).last()?;
-    let func = loc.function();
+    // lookup() yields innermost inlinee first, outermost caller last.
+    let mut locs: Vec<_> = cache.lookup(addr).collect();
+    let outer = locs.pop()?;
     f["raw"] = json!({"function": f.get("function"), "symbol": f.get("symbol")});
+    let template = f.clone();
+    apply(f, &outer);
+    Some(
+        locs.iter()
+            .rev()
+            .map(|loc| {
+                let mut g = template.clone();
+                g["raw"]["inlined"] = true.into();
+                for k in ["filename", "abs_path", "lineno"] {
+                    g.as_object_mut().map(|o| o.remove(k));
+                }
+                apply(&mut g, loc);
+                g
+            })
+            .collect(),
+    )
+}
+
+fn apply(f: &mut Value, loc: &symbolic_symcache::SourceLocation) {
+    let func = loc.function();
     f["symbol"] = func.name().into();
     f["function"] = func
         .name_for_demangling()
@@ -211,7 +239,6 @@ fn native_frame(
     if loc.line() > 0 {
         f["lineno"] = loc.line().into();
     }
-    Some(())
 }
 
 #[cfg(test)]
@@ -282,5 +309,64 @@ mod tests {
             ),
             (Some("crash_here"), Some("crash.c"), Some(2))
         );
+    }
+
+    /// tests/fixtures/inline.dSYM.zip: inline.c, clang -O2 -g arm64 dylib (__TEXT vmaddr 0):
+    /// `static inline __attribute__((always_inline)) int inner(int x) {\n return 100 / x; }`
+    /// `int outer(int x) {\n return inner(x) + 1; }` — the sdiv at 0x2d4 is inner (line 2) inlined into outer (line 5).
+    #[test]
+    fn expands_inlined_frames() {
+        let zip = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/inline.dSYM.zip"
+        ))
+        .unwrap();
+        let (id, _, _, blob) = &crate::sourcemaps::debug_files(&zip).unwrap()[0];
+        let c = rusqlite::Connection::open_in_memory().unwrap();
+        c.execute_batch(include_str!("../schema.sql")).unwrap();
+        c.execute_batch(
+            "INSERT INTO orgs (id, name, slug, created_at) VALUES (1, 'o', 'o', 0);
+             INSERT INTO projects (id, org_id, slug, name, created_at) VALUES (1, 1, 'p', 'p', 0);",
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO debug_files (project_id, debug_id, symcache, created_at) VALUES (1, ?1, ?2, 0)",
+            rusqlite::params![id, blob],
+        )
+        .unwrap();
+        let mut ev = json!({"platform": "cocoa",
+            "debug_meta": {"images": [{"type": "macho", "image_addr": "0x104000000", "image_size": 16384,
+                "debug_id": id}]},
+            "exception": {"values": [{"stacktrace": {"frames": [
+                {"instruction_addr": "0x200000000"},
+                {"instruction_addr": "0x1040002d4", "in_app": true}]}}]}});
+        super::symbolicate(&c, 1, &mut ev);
+        let f = ev["exception"]["values"][0]["stacktrace"]["frames"]
+            .as_array()
+            .unwrap();
+        let got: Vec<_> = f
+            .iter()
+            .map(|f| {
+                (
+                    f["function"].as_str(),
+                    f["lineno"].as_u64(),
+                    f["raw"]["inlined"].as_bool(),
+                )
+            })
+            .collect();
+        // oldest-first: unsymbolicated, outer caller, then the inlinee closest to the crash.
+        assert_eq!(
+            got,
+            vec![
+                (None, None, None),
+                (Some("outer"), Some(5), None),
+                (Some("inner"), Some(2), Some(true))
+            ]
+        );
+        for g in &f[1..] {
+            assert_eq!(g["instruction_addr"], "0x1040002d4");
+            assert_eq!(g["in_app"], true);
+            assert_eq!(g["filename"], "inline.c");
+        }
     }
 }
