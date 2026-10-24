@@ -62,7 +62,7 @@ cd "$DWARF_DSYM_FOLDER_PATH" && for d in *.dSYM; do
 done
 ```
 
-One dSYM per request keeps each upload under the 20 MiB request cap.
+One dSYM per request keeps each upload under the 20 MiB request cap. See and delete uploads under Settings → Projects → your project → Debug files.
 
 Already on Sentry's tooling? `sentry-cli` uploads chunked (no size cap per dSYM); Mach-O only, sources are not stored, so leave off `--include-sources`:
 

@@ -61,6 +61,10 @@ pub fn routes() -> Router<AppState> {
             "/settings/projects/{slug}/keys/{id}/revoke",
             post(revoke_key),
         )
+        .route(
+            "/settings/projects/{slug}/dsyms/{debug_id}/delete",
+            post(delete_dsym),
+        )
         .route("/settings/tokens", get(tokens).post(create_token))
         .route("/settings/tokens/{id}/revoke", post(revoke_token))
         .route("/settings/account", get(account).post(save_account))
@@ -1574,6 +1578,8 @@ struct ProjectPage {
     can_admin: bool,
     /// (slug, name) of teams that include this project
     teams: Vec<(String, String)>,
+    /// uploaded dSYMs: (debug_id, SymCache bytes, created_at)
+    dsyms: Vec<(String, i64, i64)>,
 }
 
 async fn project(me: Me, State(st): State<AppState>, h: HeaderMap, Path(slug): Path<String>) -> R {
@@ -1585,6 +1591,14 @@ async fn project(me: Me, State(st): State<AppState>, h: HeaderMap, Path(slug): P
         .read(move |c| {
             c.prepare("SELECT t.slug, t.name FROM team_projects tp JOIN teams t ON t.id = tp.team_id WHERE tp.project_id = ?1 ORDER BY t.name")?
                 .query_map([pid], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect()
+        })
+        .await?;
+    let dsyms = st
+        .db
+        .read(move |c| {
+            c.prepare("SELECT debug_id, length(symcache), created_at FROM debug_files WHERE project_id = ?1 ORDER BY created_at DESC")?
+                .query_map([pid], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
                 .collect()
         })
         .await?;
@@ -1630,6 +1644,7 @@ async fn project(me: Me, State(st): State<AppState>, h: HeaderMap, Path(slug): P
         quotas,
         can_admin,
         teams,
+        dsyms,
     })
 }
 
@@ -1712,6 +1727,27 @@ async fn revoke_key(
         })
         .await?;
     flash(&format!("/settings/projects/{slug}"), "Key revoked")
+}
+
+async fn delete_dsym(
+    me: Me,
+    State(st): State<AppState>,
+    Path((slug, debug_id)): Path<(String, String)>,
+) -> R {
+    let p = admin_project_for(&st, &me, slug.clone()).await?;
+    let n = st
+        .db
+        .write(move |c| {
+            c.execute(
+                "DELETE FROM debug_files WHERE project_id = ?1 AND debug_id = ?2",
+                params![p.id, debug_id],
+            )
+        })
+        .await?;
+    if n == 0 {
+        return Err(not_found());
+    }
+    flash(&format!("/settings/projects/{slug}"), "Debug file deleted")
 }
 
 pub struct TokenRow {

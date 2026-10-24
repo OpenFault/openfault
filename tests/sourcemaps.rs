@@ -147,6 +147,23 @@ async fn upload_then_symbolicate() {
         .unwrap();
     let s = app.clone().oneshot(req).await.unwrap().status();
     assert_eq!(s, StatusCode::PAYLOAD_TOO_LARGE);
+    // list + delete: same project check as upload.
+    let (s, j) = call(&app, "GET", dsyms, "", vec![]).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(j.as_array().unwrap().len(), 1);
+    assert_eq!(j[0]["debugId"], "353abed5-8469-3171-a13c-b81f142cf274");
+    assert!(j[0]["size"].as_i64().unwrap() > 0);
+    let (s, _) = call_as(&app, MEMBER_TOKEN, "GET", dsyms, "", vec![]).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let one = format!("{dsyms}353abed5-8469-3171-a13c-b81f142cf274/");
+    let (s, _) = call_as(&app, MEMBER_TOKEN, "DELETE", &one, "", vec![]).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let (s, _) = call(&app, "DELETE", &one, "", vec![]).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = call(&app, "DELETE", &one, "", vec![]).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let (_, j) = call(&app, "GET", dsyms, "", vec![]).await;
+    assert_eq!(j, json!([]));
 
     let (s, j) = call(&app, "GET", &format!("{ORG}/chunk-upload/"), "", vec![]).await;
     assert_eq!(s, StatusCode::OK);

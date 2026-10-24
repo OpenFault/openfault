@@ -8,7 +8,7 @@ use axum::{
     Json, Router,
     extract::{FromRequestParts, Path, Request, State},
     http::{StatusCode, header, request::Parts},
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use rusqlite::{OptionalExtension, params};
 use serde::Deserialize;
@@ -37,7 +37,8 @@ pub fn routes() -> Router<AppState> {
         .route(&format!("{p}/releases/"), post(release_new))
         .route(&format!("{p}/releases/{{v}}/"), get(release).put(release))
         .route(&format!("{p}/releases/{{v}}/deploys/"), post(created))
-        .route(&format!("{p}/files/dsyms/"), post(dsyms))
+        .route(&format!("{p}/files/dsyms/"), get(dsym_list).post(dsyms))
+        .route(&format!("{p}/files/dsyms/{{id}}/"), delete(dsym_delete))
         .route(&format!("{p}/files/difs/assemble/"), post(difs_assemble))
 }
 
@@ -138,17 +139,7 @@ async fn store_debug_files(
     let (uid, scoped) = (t.user_id, t.project_id);
     st.db
         .write(move |c| {
-            let admin: bool =
-                c.query_row("SELECT role != 'member' FROM users WHERE id = ?1", [uid], |r| r.get(0))?;
-            let pid: Option<i64> = c
-                .query_row(
-                    &format!("SELECT id FROM projects WHERE {} AND slug = ?3", crate::ui::VISIBLE),
-                    params![admin, uid, slug],
-                    |r| r.get(0),
-                )
-                .optional()?;
-            // a project-scoped token only ever writes to its own project.
-            let Some(pid) = pid.filter(|p| scoped.is_none_or(|s| s == *p)) else {
+            let Some(pid) = dsym_project(c, uid, scoped, &slug)? else {
                 return Ok(Err((StatusCode::NOT_FOUND, "unknown project".to_string())));
             };
             for (id, _, _, blob) in &caches {
@@ -231,6 +222,87 @@ fn bad(e: multer::Error) -> (StatusCode, String) {
         _ => StatusCode::BAD_REQUEST,
     };
     (s, e.to_string())
+}
+
+/// The dSYM routes' project check: visible to the token's user and, for a project-scoped token, its own project.
+fn dsym_project(
+    c: &rusqlite::Connection,
+    uid: i64,
+    scoped: Option<i64>,
+    slug: &str,
+) -> rusqlite::Result<Option<i64>> {
+    let admin: bool = c.query_row(
+        "SELECT role != 'member' FROM users WHERE id = ?1",
+        [uid],
+        |r| r.get(0),
+    )?;
+    let pid: Option<i64> = c
+        .query_row(
+            &format!(
+                "SELECT id FROM projects WHERE {} AND slug = ?3",
+                crate::ui::VISIBLE
+            ),
+            params![admin, uid, slug],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(pid.filter(|p| scoped.is_none_or(|s| s == *p)))
+}
+
+async fn dsym_list(
+    W(t): W,
+    State(st): State<AppState>,
+    Path(p): Path<HashMap<String, String>>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let (slug, uid, scoped) = (p["project"].clone(), t.user_id, t.project_id);
+    st.db
+        .read(move |c| {
+            let Some(pid) = dsym_project(c, uid, scoped, &slug)? else {
+                return Ok(Err((StatusCode::NOT_FOUND, "unknown project".to_string())));
+            };
+            // object name / arch aren't stored, only the SymCache.
+            let rows = c
+                .prepare("SELECT id, debug_id, length(symcache), created_at FROM debug_files WHERE project_id = ?1 ORDER BY created_at DESC")?
+                .query_map([pid], |r| {
+                    let (id, d, size, at): (i64, String, i64, i64) = (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?);
+                    Ok(json!({"id": id.to_string(), "uuid": d, "debugId": d, "objectName": null, "cpuName": null,
+                        "symbolType": "macho", "size": size, "dateCreated": jiff::Timestamp::from_second(at).map(|t| t.to_string()).unwrap_or_default()}))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(Ok(Json(Value::Array(rows))))
+        })
+        .await
+        .map_err(e500)?
+}
+
+async fn dsym_delete(
+    W(t): W,
+    State(st): State<AppState>,
+    Path(p): Path<HashMap<String, String>>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let (slug, id, uid, scoped) = (
+        p["project"].clone(),
+        p["id"].clone(),
+        t.user_id,
+        t.project_id,
+    );
+    st.db
+        .write(move |c| {
+            let Some(pid) = dsym_project(c, uid, scoped, &slug)? else {
+                return Ok(Err((StatusCode::NOT_FOUND, "unknown project".to_string())));
+            };
+            let n = c.execute(
+                "DELETE FROM debug_files WHERE project_id = ?1 AND debug_id = ?2",
+                params![pid, id],
+            )?;
+            Ok(if n == 0 {
+                Err((StatusCode::NOT_FOUND, "unknown debug file".to_string()))
+            } else {
+                Ok(StatusCode::NO_CONTENT)
+            })
+        })
+        .await
+        .map_err(e500)?
 }
 
 /// Zip of dSYMs (or a bare Mach-O/fat file) → its debug files.
