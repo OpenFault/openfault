@@ -21,9 +21,7 @@ fn blob(c: &Connection, sql: &str, pid: i64, id: &str) -> Option<Rc<Vec<u8>>> {
         return Some(b);
     }
     let b: Vec<u8> = c
-        .query_row(sql, params![pid, id],
-            |r| r.get(0),
-        )
+        .query_row(sql, params![pid, id], |r| r.get(0))
         .optional()
         .ok()??;
     let b = Rc::new(b);
@@ -136,7 +134,11 @@ fn macho_images(ev: &Value) -> Vec<(u64, u64, String)> {
         .filter(|i| i["type"] == "macho")
         .filter_map(|i| {
             let a = hex(&i["image_addr"])?;
-            Some((a, a + i["image_size"].as_u64()?, i["debug_id"].as_str()?.to_lowercase()))
+            Some((
+                a,
+                a + i["image_size"].as_u64()?,
+                i["debug_id"].as_str()?.to_lowercase(),
+            ))
         })
         .collect()
 }
@@ -155,8 +157,15 @@ fn native(c: &Connection, pid: i64, ev: &mut Value) {
     }
     let mut changed = false;
     for path in ["/exception/values", "/threads/values"] {
-        for v in ev.pointer_mut(path).and_then(Value::as_array_mut).into_iter().flatten() {
-            let frames = v.pointer_mut("/stacktrace/frames").and_then(Value::as_array_mut);
+        for v in ev
+            .pointer_mut(path)
+            .and_then(Value::as_array_mut)
+            .into_iter()
+            .flatten()
+        {
+            let frames = v
+                .pointer_mut("/stacktrace/frames")
+                .and_then(Value::as_array_mut);
             let Some(frames) = frames else { continue };
             let n = frames.len();
             for (i, f) in frames.iter_mut().enumerate() {
@@ -177,14 +186,22 @@ fn native_frame(
     innermost: bool,
 ) -> Option<()> {
     let (id, addr) = rel_addr(images, hex(&f["instruction_addr"])?, innermost)?;
-    let b = blob(c, "SELECT symcache FROM debug_files WHERE project_id = ?1 AND debug_id = ?2", pid, id)?;
+    let b = blob(
+        c,
+        "SELECT symcache FROM debug_files WHERE project_id = ?1 AND debug_id = ?2",
+        pid,
+        id,
+    )?;
     let cache = SymCache::parse(&b).ok()?;
     // shortcut: inlined frames collapse to the outermost caller; expand them if inline detail is wanted.
     let loc = cache.lookup(addr).last()?;
     let func = loc.function();
     f["raw"] = json!({"function": f.get("function"), "symbol": f.get("symbol")});
     f["symbol"] = func.name().into();
-    f["function"] = func.name_for_demangling().try_demangle(DemangleOptions::name_only()).into();
+    f["function"] = func
+        .name_for_demangling()
+        .try_demangle(DemangleOptions::name_only())
+        .into();
     if let Some(file) = loc.file() {
         let path = file.full_path();
         f["filename"] = path.rsplit('/').next().unwrap_or(&path).into();
@@ -207,15 +224,25 @@ mod tests {
             {"type": "sourcemap", "image_addr": "0x0", "image_size": 1, "debug_id": "x"}]}});
         let imgs = super::macho_images(&ev);
         assert_eq!(imgs, vec![(0x100000000, 0x100001000, "abcd-ef".into())]);
-        assert_eq!(super::rel_addr(&imgs, 0x100000010, true), Some(("abcd-ef", 0x10)));
-        assert_eq!(super::rel_addr(&imgs, 0x100000010, false), Some(("abcd-ef", 0xf)));
+        assert_eq!(
+            super::rel_addr(&imgs, 0x100000010, true),
+            Some(("abcd-ef", 0x10))
+        );
+        assert_eq!(
+            super::rel_addr(&imgs, 0x100000010, false),
+            Some(("abcd-ef", 0xf))
+        );
         assert_eq!(super::rel_addr(&imgs, 0x100001000, true), None);
     }
 
     /// tests/fixtures/crash.dSYM.zip: `int crash_here(int x) {\n return x * 2; }` (crash.c), clang -g arm64.
     #[test]
     fn symbolicates_dsym_fixture() {
-        let zip = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/crash.dSYM.zip")).unwrap();
+        let zip = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/crash.dSYM.zip"
+        ))
+        .unwrap();
         let files = crate::sourcemaps::debug_files(&zip).unwrap();
         assert_eq!(files.len(), 1);
         let (id, _, _, blob) = &files[0];
@@ -242,7 +269,13 @@ mod tests {
         assert_eq!(ev["symbolicated"], true);
         let f = &ev["exception"]["values"][0]["stacktrace"]["frames"];
         assert_eq!(f[0].get("function"), None);
-        assert_eq!((f[1]["function"].as_str(), f[1]["filename"].as_str(), f[1]["lineno"].as_u64()),
-            (Some("crash_here"), Some("crash.c"), Some(2)));
+        assert_eq!(
+            (
+                f[1]["function"].as_str(),
+                f[1]["filename"].as_str(),
+                f[1]["lineno"].as_u64()
+            ),
+            (Some("crash_here"), Some("crash.c"), Some(2))
+        );
     }
 }

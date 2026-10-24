@@ -116,7 +116,13 @@ async fn upload_then_symbolicate() {
 
     // dSYM upload (legacy sentry-cli DIF path / curl -F); symbolication itself is unit-tested in process::symbolicate.
     let mut mp = b"--XX\r\nContent-Disposition: form-data; name=\"file\"; filename=\"crash.dSYM.zip\"\r\n\r\n".to_vec();
-    mp.extend(std::fs::read(format!("{}/tests/fixtures/crash.dSYM.zip", env!("CARGO_MANIFEST_DIR"))).unwrap());
+    mp.extend(
+        std::fs::read(format!(
+            "{}/tests/fixtures/crash.dSYM.zip",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .unwrap(),
+    );
     mp.extend(b"\r\n--XX--\r\n");
     let dsyms = "/api/0/projects/openfault/dev/files/dsyms/";
     let ct = "multipart/form-data; boundary=XX";

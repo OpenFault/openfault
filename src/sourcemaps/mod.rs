@@ -123,8 +123,13 @@ async fn dsyms(
         .map_err(e500)?
         .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
     let (slug, uid, scoped) = (p["project"].clone(), t.user_id, t.project_id);
-    let out = caches.iter().map(|(id, arch, name, _)| json!({"id": id, "uuid": id, "debugId": id,
-        "objectName": name, "cpuName": arch, "symbolType": "macho", "headers": {}, "data": {}})).collect();
+    let out = caches
+        .iter()
+        .map(|(id, arch, name, _)| {
+            json!({"id": id, "uuid": id, "debugId": id,
+        "objectName": name, "cpuName": arch, "symbolType": "macho", "headers": {}, "data": {}})
+        })
+        .collect();
     st.db
         .write(move |c| {
             let admin: bool =
@@ -154,8 +159,11 @@ async fn dsyms(
     Ok(Json(Value::Array(out)))
 }
 
-/// Zip of dSYMs (or a bare Mach-O/fat file) → [(debug_id, arch, object name, SymCache blob)].
-pub(crate) fn debug_files(data: &[u8]) -> Result<Vec<(String, String, String, Vec<u8>)>, String> {
+/// Zip of dSYMs (or a bare Mach-O/fat file) → its debug files.
+/// (debug_id, arch, object name, SymCache blob)
+type DebugFile = (String, String, String, Vec<u8>);
+
+pub(crate) fn debug_files(data: &[u8]) -> Result<Vec<DebugFile>, String> {
     use symbolic_debuginfo::{Archive, FileFormat};
     let mut files = vec![];
     if data.starts_with(b"PK") {
@@ -165,7 +173,10 @@ pub(crate) fn debug_files(data: &[u8]) -> Result<Vec<(String, String, String, Ve
             let mut f = z.by_index(i).map_err(|e| e.to_string())?;
             let name = f.name().map_err(|e| e.to_string())?.to_string();
             let mut b = vec![];
-            f.by_ref().take(budget + 1).read_to_end(&mut b).map_err(|e| format!("{name}: {e}"))?;
+            f.by_ref()
+                .take(budget + 1)
+                .read_to_end(&mut b)
+                .map_err(|e| format!("{name}: {e}"))?;
             budget = budget
                 .checked_sub(b.len() as u64)
                 .ok_or("bundle too large when decompressed")?;
@@ -182,9 +193,11 @@ pub(crate) fn debug_files(data: &[u8]) -> Result<Vec<(String, String, String, Ve
         for o in a.objects() {
             let o = o.map_err(|e| format!("{name}: {e}"))?;
             let mut conv = symbolic_symcache::SymCacheConverter::new();
-            conv.process_object(&o).map_err(|e| format!("{name}: {e}"))?;
+            conv.process_object(&o)
+                .map_err(|e| format!("{name}: {e}"))?;
             let mut blob = vec![];
-            conv.serialize(&mut Cursor::new(&mut blob)).map_err(|e| e.to_string())?;
+            conv.serialize(&mut Cursor::new(&mut blob))
+                .map_err(|e| e.to_string())?;
             let base = name.rsplit('/').next().unwrap_or(&name).to_string();
             out.push((o.debug_id().to_string(), o.arch().to_string(), base, blob));
         }
