@@ -114,6 +114,19 @@ async fn upload_then_symbolicate() {
     tokio::spawn(process::run(db.clone(), st.notify.clone()));
     let app = app(st);
 
+    // dSYM upload (legacy sentry-cli DIF path / curl -F); symbolication itself is unit-tested in process::symbolicate.
+    let mut mp = b"--XX\r\nContent-Disposition: form-data; name=\"file\"; filename=\"crash.dSYM.zip\"\r\n\r\n".to_vec();
+    mp.extend(std::fs::read(format!("{}/tests/fixtures/crash.dSYM.zip", env!("CARGO_MANIFEST_DIR"))).unwrap());
+    mp.extend(b"\r\n--XX--\r\n");
+    let dsyms = "/api/0/projects/openfault/dev/files/dsyms/";
+    let ct = "multipart/form-data; boundary=XX";
+    let (s, j) = call(&app, "POST", dsyms, ct, mp.clone()).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(j[0]["debugId"], "353abed5-8469-3171-a13c-b81f142cf274");
+    // a member outside the project cannot write to it.
+    let (s, _) = call_as(&app, MEMBER_TOKEN, "POST", dsyms, ct, mp).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
     let (s, j) = call(&app, "GET", &format!("{ORG}/chunk-upload/"), "", vec![]).await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(j["hashAlgorithm"], "sha1");

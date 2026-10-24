@@ -50,6 +50,20 @@ In production, put it behind HTTPS and set `OPENFAULT_BASE_URL`. Upgrades are pu
 
 Configuration, env vars and the full guide live at [openfault.dev](https://openfault.dev).
 
+### iOS crash symbolication
+
+Upload dSYMs and native `sentry-cocoa` crashes resolve to function, file and line. Add a Run Script build phase (Release), with a `write` API token from Settings:
+
+```sh
+cd "$DWARF_DSYM_FOLDER_PATH" && for d in *.dSYM; do
+  zip -qr "/tmp/$d.zip" "$d"
+  curl -fsS -H "Authorization: Bearer $OPENFAULT_TOKEN" -F "file=@/tmp/$d.zip" \
+    "https://errors.example.com/api/0/projects/<org>/<project-slug>/files/dsyms/"
+done
+```
+
+One dSYM per request keeps each upload under the 20 MiB request cap.
+
 ## iOS app
 
 Coming soon to the App Store. Triage from your phone, with push alerts and Home Screen widgets. Pair it from Settings → Devices.

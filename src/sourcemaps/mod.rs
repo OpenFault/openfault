@@ -95,8 +95,104 @@ fn release_json(v: &str) -> Value {
            "dateReleased": null, "lastEvent": null, "newGroups": 0, "projects": []})
 }
 
-async fn dsyms(_: W) -> (StatusCode, &'static str) {
-    (StatusCode::BAD_REQUEST, "not supported")
+/// Legacy sentry-cli DIF upload (also plain `curl -F file=@X.dSYM.zip`): multipart `file` = zip of
+/// dSYM bundles or one Mach-O. Each object becomes a SymCache keyed by debug_id. No chunked DIF upload.
+async fn dsyms(
+    W(t): W,
+    State(st): State<AppState>,
+    Path(p): Path<HashMap<String, String>>,
+    req: Request,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let bad = |e: multer::Error| (StatusCode::BAD_REQUEST, e.to_string());
+    let ct = req
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    let boundary = multer::parse_boundary(ct).map_err(bad)?;
+    let mut mp = multer::Multipart::new(req.into_body().into_data_stream(), boundary);
+    let mut data = None;
+    while let Some(f) = mp.next_field().await.map_err(bad)? {
+        if f.name() == Some("file") {
+            data = Some(f.bytes().await.map_err(bad)?);
+        }
+    }
+    let data = data.ok_or((StatusCode::BAD_REQUEST, "missing `file` field".into()))?;
+    let caches = tokio::task::spawn_blocking(move || debug_files(&data))
+        .await
+        .map_err(e500)?
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    let (slug, uid, scoped) = (p["project"].clone(), t.user_id, t.project_id);
+    let out = caches.iter().map(|(id, arch, name, _)| json!({"id": id, "uuid": id, "debugId": id,
+        "objectName": name, "cpuName": arch, "symbolType": "macho", "headers": {}, "data": {}})).collect();
+    st.db
+        .write(move |c| {
+            let admin: bool =
+                c.query_row("SELECT role != 'member' FROM users WHERE id = ?1", [uid], |r| r.get(0))?;
+            let pid: Option<i64> = c
+                .query_row(
+                    &format!("SELECT id FROM projects WHERE {} AND slug = ?3", crate::ui::VISIBLE),
+                    params![admin, uid, slug],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            // a project-scoped token only ever writes to its own project.
+            let Some(pid) = pid.filter(|p| scoped.is_none_or(|s| s == *p)) else {
+                return Ok(Err((StatusCode::NOT_FOUND, "unknown project".to_string())));
+            };
+            for (id, _, _, blob) in &caches {
+                c.execute(
+                    "INSERT INTO debug_files (project_id, debug_id, symcache, created_at) VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT (project_id, debug_id) DO UPDATE SET symcache = excluded.symcache, created_at = excluded.created_at",
+                    params![pid, id, blob, now()],
+                )?;
+            }
+            Ok(Ok(()))
+        })
+        .await
+        .map_err(e500)??;
+    Ok(Json(Value::Array(out)))
+}
+
+/// Zip of dSYMs (or a bare Mach-O/fat file) → [(debug_id, arch, object name, SymCache blob)].
+pub(crate) fn debug_files(data: &[u8]) -> Result<Vec<(String, String, String, Vec<u8>)>, String> {
+    use symbolic_debuginfo::{Archive, FileFormat};
+    let mut files = vec![];
+    if data.starts_with(b"PK") {
+        let mut z = zip::ZipArchive::new(Cursor::new(data)).map_err(|e| e.to_string())?;
+        let mut budget = MAX_UNZIPPED;
+        for i in 0..z.len() {
+            let mut f = z.by_index(i).map_err(|e| e.to_string())?;
+            let name = f.name().map_err(|e| e.to_string())?.to_string();
+            let mut b = vec![];
+            f.by_ref().take(budget + 1).read_to_end(&mut b).map_err(|e| format!("{name}: {e}"))?;
+            budget = budget
+                .checked_sub(b.len() as u64)
+                .ok_or("bundle too large when decompressed")?;
+            if Archive::peek(&b) != FileFormat::Unknown {
+                files.push((name, b));
+            }
+        }
+    } else {
+        files.push((String::new(), data.to_vec()));
+    }
+    let mut out = vec![];
+    for (name, b) in files {
+        let a = Archive::parse(&b).map_err(|e| format!("{name}: {e}"))?;
+        for o in a.objects() {
+            let o = o.map_err(|e| format!("{name}: {e}"))?;
+            let mut conv = symbolic_symcache::SymCacheConverter::new();
+            conv.process_object(&o).map_err(|e| format!("{name}: {e}"))?;
+            let mut blob = vec![];
+            conv.serialize(&mut Cursor::new(&mut blob)).map_err(|e| e.to_string())?;
+            let base = name.rsplit('/').next().unwrap_or(&name).to_string();
+            out.push((o.debug_id().to_string(), o.arch().to_string(), base, blob));
+        }
+    }
+    if out.is_empty() {
+        return Err("no debug files found".into());
+    }
+    Ok(out)
 }
 
 async fn chunk_opts(_: W, Path(org): Path<String>) -> Json<Value> {

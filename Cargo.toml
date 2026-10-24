@@ -30,6 +30,9 @@ rmcp = { version = "3", default-features = false, features = ["server", "macros"
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1", "tokio1-rustls", "builder", "hostname", "ring", "webpki-roots"] }
 
 symbolic-sourcemapcache = "13.9"
+symbolic-debuginfo = { version = "13.9", default-features = false, features = ["macho"] }
+symbolic-symcache = "13.9"
+symbolic-demangle = { version = "13.9", default-features = false, features = ["swift"] }
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 sha1 = "0.10"
 multer = "3"
