@@ -64,6 +64,12 @@ done
 
 One dSYM per request keeps each upload under the 20 MiB request cap.
 
+Already on Sentry's tooling? `sentry-cli` uploads chunked (no size cap per dSYM); Mach-O only, sources are not stored, so leave off `--include-sources`:
+
+```sh
+SENTRY_URL=https://errors.example.com SENTRY_ORG=<org> SENTRY_PROJECT=<project-slug> SENTRY_AUTH_TOKEN=$OPENFAULT_TOKEN sentry-cli debug-files upload "$DWARF_DSYM_FOLDER_PATH"
+```
+
 ## iOS app
 
 Coming soon to the App Store. Triage from your phone, with push alerts and Home Screen widgets. Pair it from Settings → Devices.
