@@ -38,6 +38,7 @@ pub fn routes() -> Router<AppState> {
         .route(&format!("{p}/releases/{{v}}/"), get(release).put(release))
         .route(&format!("{p}/releases/{{v}}/deploys/"), post(created))
         .route(&format!("{p}/files/dsyms/"), post(dsyms))
+        .route(&format!("{p}/files/difs/assemble/"), post(difs_assemble))
 }
 
 /// Bearer `of_…` token with `write` scope.
@@ -96,7 +97,7 @@ fn release_json(v: &str) -> Value {
 }
 
 /// Legacy sentry-cli DIF upload (also plain `curl -F file=@X.dSYM.zip`): multipart `file` = zip of
-/// dSYM bundles or one Mach-O. Each object becomes a SymCache keyed by debug_id. No chunked DIF upload.
+/// dSYM bundles or one Mach-O. Each object becomes a SymCache keyed by debug_id.
 async fn dsyms(
     W(t): W,
     State(st): State<AppState>,
@@ -115,7 +116,6 @@ async fn dsyms(
         .await
         .map_err(e500)?
         .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
-    let (slug, uid, scoped) = (p["project"].clone(), t.user_id, t.project_id);
     let out = caches
         .iter()
         .map(|(id, arch, name, _)| {
@@ -123,6 +123,19 @@ async fn dsyms(
         "objectName": name, "cpuName": arch, "symbolType": "macho", "headers": {}, "data": {}})
         })
         .collect();
+    store_debug_files(&st, &t, p["project"].clone(), caches, vec![]).await?;
+    Ok(Json(Value::Array(out)))
+}
+
+/// Writes SymCaches to the project `slug` (if the token may) and drops the assembled `chunks`.
+async fn store_debug_files(
+    st: &AppState,
+    t: &ApiToken,
+    slug: String,
+    caches: Vec<DebugFile>,
+    chunks: Vec<String>,
+) -> Result<(), (StatusCode, String)> {
+    let (uid, scoped) = (t.user_id, t.project_id);
     st.db
         .write(move |c| {
             let admin: bool =
@@ -145,11 +158,55 @@ async fn dsyms(
                     params![pid, id, blob, now()],
                 )?;
             }
+            for h in &chunks {
+                c.execute("DELETE FROM chunks WHERE sha1 = ?1", [h])?;
+            }
             Ok(Ok(()))
         })
         .await
-        .map_err(e500)??;
-    Ok(Json(Value::Array(out)))
+        .map_err(e500)?
+}
+
+#[derive(Deserialize)]
+struct Dif {
+    chunks: Vec<String>,
+}
+
+/// sentry-cli `debug-files upload`: {checksum: {name, debug_id, chunks}} → per-file state. Assembled
+/// synchronously, so the first complete call already answers "ok".
+async fn difs_assemble(
+    W(t): W,
+    State(st): State<AppState>,
+    Path(p): Path<HashMap<String, String>>,
+    Json(req): Json<HashMap<String, Dif>>,
+) -> R {
+    let mut out = serde_json::Map::new();
+    for (sum, d) in req {
+        let key = format!(
+            "dif:{sum}:{}:{:?}:{}",
+            t.user_id, t.project_id, p["project"]
+        );
+        let r = if ASSEMBLED.lock().unwrap().contains(&key) {
+            json!({"state": "ok", "missingChunks": []})
+        } else {
+            match load(&st, &sum, &d.chunks).await? {
+                Err(state) => state,
+                Ok(data) => match tokio::task::spawn_blocking(move || debug_files(&data))
+                    .await
+                    .map_err(e500)?
+                {
+                    Err(e) => json!({"state": "error", "missingChunks": [], "detail": e}),
+                    Ok(caches) => {
+                        store_debug_files(&st, &t, p["project"].clone(), caches, d.chunks).await?;
+                        mark_assembled(key);
+                        json!({"state": "ok", "missingChunks": []})
+                    }
+                },
+            }
+        };
+        out.insert(sum, r);
+    }
+    Ok(Json(Value::Object(out)))
 }
 
 /// Multipart over the decoded body, capped at MAX_BODY: a gzip body passes the wire cap and would inflate to 100 MiB.
@@ -235,7 +292,7 @@ async fn chunk_opts(_: W, Path(org): Path<String>) -> Json<Value> {
         "concurrency": 8, "hashAlgorithm": "sha1",
         // ponytail: no gzip chunks, so no gzip decoder; sentry-cli then sends plain `file` parts.
         "compression": [],
-        "accept": ["artifact_bundles", "artifact_bundles_v2", "release_files"],
+        "accept": ["artifact_bundles", "artifact_bundles_v2", "release_files", "debug_files"],
     }))
 }
 
@@ -305,41 +362,15 @@ async fn assemble(W(t): W, State(st): State<AppState>, Json(a): Json<Assemble>) 
     if ASSEMBLED.lock().unwrap().contains(&key) {
         return ok();
     }
-    if a.chunks.len() > MAX_FILE / CHUNK_SIZE {
-        return Err((StatusCode::PAYLOAD_TOO_LARGE, "bundle too large".into()));
-    }
-    let ids = a.chunks.clone();
-    let found: Vec<Option<Vec<u8>>> = st
-        .db
-        .read(move |c| {
-            let mut q = c.prepare("SELECT data FROM chunks WHERE sha1 = ?1")?;
-            ids.iter()
-                .map(|h| q.query_row([h], |r| r.get(0)).optional())
-                .collect()
-        })
-        .await
-        .map_err(e500)?;
-    let missing: Vec<&String> = a
-        .chunks
-        .iter()
-        .zip(&found)
-        .filter(|(_, d)| d.is_none())
-        .map(|(h, _)| h)
-        .collect();
-    if !missing.is_empty() {
-        return Ok(Json(
-            json!({"state": "not_found", "missingChunks": missing}),
-        ));
-    }
-    let zip: Vec<u8> = found.into_iter().flatten().flatten().collect();
     let err = |d: String| {
         Ok(Json(
             json!({"state": "error", "missingChunks": [], "detail": d}),
         ))
     };
-    if sha1_hex(&zip) != a.checksum.to_lowercase() {
-        return err("checksum mismatch".into());
-    }
+    let zip = match load(&st, &a.checksum, &a.chunks).await? {
+        Err(state) => return Ok(Json(state)),
+        Ok(zip) => zip,
+    };
     let caches = match tokio::task::spawn_blocking(move || bundle(&zip))
         .await
         .map_err(e500)?
@@ -392,13 +423,55 @@ async fn assemble(W(t): W, State(st): State<AppState>, Json(a): Json<Assemble>) 
         .await
         .map_err(e500)?;
     wrote?;
+    mark_assembled(key);
+    ok()
+}
+
+fn mark_assembled(key: String) {
     let mut done = ASSEMBLED.lock().unwrap();
     // ponytail: cleared when full instead of aged out.
     if done.len() >= 256 {
         done.clear();
     }
     done.insert(key);
-    ok()
+}
+
+/// Concatenates staged chunks, or Err(the not_found / error assemble state).
+async fn load(
+    st: &AppState,
+    checksum: &str,
+    chunks: &[String],
+) -> Result<Result<Vec<u8>, Value>, (StatusCode, String)> {
+    if chunks.len() > MAX_FILE / CHUNK_SIZE {
+        return Err((StatusCode::PAYLOAD_TOO_LARGE, "file too large".into()));
+    }
+    let ids = chunks.to_vec();
+    let found: Vec<Option<Vec<u8>>> = st
+        .db
+        .read(move |c| {
+            let mut q = c.prepare("SELECT data FROM chunks WHERE sha1 = ?1")?;
+            ids.iter()
+                .map(|h| q.query_row([h], |r| r.get(0)).optional())
+                .collect()
+        })
+        .await
+        .map_err(e500)?;
+    let missing: Vec<String> = chunks
+        .iter()
+        .zip(&found)
+        .filter(|(_, d)| d.is_none())
+        .map(|(h, _)| h.clone())
+        .collect();
+    if !missing.is_empty() {
+        return Ok(Err(json!({"state": "not_found", "missingChunks": missing})));
+    }
+    let data: Vec<u8> = found.into_iter().flatten().flatten().collect();
+    if sha1_hex(&data) != checksum.to_lowercase() {
+        return Ok(Err(
+            json!({"state": "error", "missingChunks": [], "detail": "checksum mismatch"}),
+        ));
+    }
+    Ok(Ok(data))
 }
 
 /// Artifact bundle zip → [(debug_id, SourceMapCache blob)].

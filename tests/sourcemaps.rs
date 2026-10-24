@@ -152,6 +152,101 @@ async fn upload_then_symbolicate() {
     assert_eq!(s, StatusCode::OK);
     assert_eq!(j["hashAlgorithm"], "sha1");
     assert_eq!(j["url"], "/organizations/openfault/chunk-upload/");
+    assert!(
+        j["accept"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("debug_files"))
+    );
+
+    // `sentry-cli debug-files upload`: the bare DWARF Mach-O, chunked, via difs/assemble.
+    db.write(|c| c.execute("DELETE FROM debug_files", []))
+        .await
+        .unwrap();
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(
+        std::fs::read(format!(
+            "{}/tests/fixtures/crash.dSYM.zip",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .unwrap(),
+    ))
+    .unwrap();
+    let mut macho = vec![];
+    std::io::Read::read_to_end(
+        &mut z
+            .by_name("crash.dSYM/Contents/Resources/DWARF/crash")
+            .unwrap(),
+        &mut macho,
+    )
+    .unwrap();
+    let parts: Vec<&[u8]> = macho.chunks(4096).collect();
+    assert!(parts.len() > 1);
+    let ids: Vec<String> = parts.iter().map(|c| hex(c)).collect();
+    let sum = hex(&macho);
+    let difs = "/api/0/projects/openfault/dev/files/difs/assemble/";
+    let req = serde_json::to_vec(
+        &json!({&sum: {"name": "crash", "debug_id": "353abed5-8469-3171-a13c-b81f142cf274", "chunks": ids}}),
+    )
+    .unwrap();
+    let (_, j) = call(&app, "POST", difs, "application/json", req.clone()).await;
+    assert_eq!(j[&sum]["state"], "not_found");
+    assert_eq!(j[&sum]["missingChunks"], json!(ids));
+    let mut mp = vec![];
+    for (id, c) in ids.iter().zip(&parts) {
+        mp.extend(
+            format!(
+                "--XX\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{id}\"\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        mp.extend(*c);
+        mp.extend(b"\r\n");
+    }
+    mp.extend(b"--XX--\r\n");
+    let (s, _) = call(&app, "POST", &format!("{ORG}/chunk-upload/"), ct, mp).await;
+    assert_eq!(s, StatusCode::OK);
+    // a member outside the project cannot assemble into it.
+    let (s, _) = call_as(
+        &app,
+        MEMBER_TOKEN,
+        "POST",
+        difs,
+        "application/json",
+        req.clone(),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    for _ in 0..2 {
+        let (_, j) = call(&app, "POST", difs, "application/json", req.clone()).await;
+        assert_eq!(j[&sum]["state"], "ok", "{j}");
+    }
+    let n: i64 = db
+        .read(|c| {
+            c.query_row(
+                "SELECT count(*) FROM debug_files WHERE debug_id = '353abed5-8469-3171-a13c-b81f142cf274'",
+                [],
+                |r| r.get(0),
+            )
+        })
+        .await
+        .unwrap();
+    assert_eq!(n, 1);
+    // garbage that is not an object file is an error state, not a 500.
+    let junk = b"not a mach-o".to_vec();
+    let jid = hex(&junk);
+    let mp = [
+        format!(
+            "--XX\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{jid}\"\r\n\r\n"
+        )
+        .into_bytes(),
+        junk,
+        b"\r\n--XX--\r\n".to_vec(),
+    ]
+    .concat();
+    call(&app, "POST", &format!("{ORG}/chunk-upload/"), ct, mp).await;
+    let req = serde_json::to_vec(&json!({&jid: {"name": "junk", "chunks": [jid]}})).unwrap();
+    let (_, j) = call(&app, "POST", difs, "application/json", req).await;
+    assert_eq!(j[&jid]["state"], "error", "{j}");
 
     let zip = bundle();
     let sum = hex(&zip);
