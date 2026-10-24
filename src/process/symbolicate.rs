@@ -136,7 +136,7 @@ fn macho_images(ev: &Value) -> Vec<(u64, u64, String)> {
             let a = hex(&i["image_addr"])?;
             Some((
                 a,
-                a + i["image_size"].as_u64()?,
+                a.checked_add(i["image_size"].as_u64()?)?,
                 i["debug_id"].as_str()?.to_lowercase(),
             ))
         })
@@ -147,7 +147,8 @@ fn macho_images(ev: &Value) -> Vec<(u64, u64, String)> {
 /// (Sentry's heuristic); the innermost frame (last in the array) is the faulting pc itself.
 fn rel_addr(images: &[(u64, u64, String)], addr: u64, innermost: bool) -> Option<(&str, u64)> {
     let (start, _, id) = images.iter().find(|(s, e, _)| (*s..*e).contains(&addr))?;
-    Some((id, addr - start - u64::from(!innermost)))
+    // checked: client-controlled addresses must not panic (debug) the processor.
+    Some((id, (addr - start).checked_sub(u64::from(!innermost))?))
 }
 
 fn native(c: &Connection, pid: i64, ev: &mut Value) {
@@ -233,6 +234,10 @@ mod tests {
             Some(("abcd-ef", 0xf))
         );
         assert_eq!(super::rel_addr(&imgs, 0x100001000, true), None);
+        assert_eq!(super::rel_addr(&imgs, 0x100000000, false), None);
+        let ev = json!({"debug_meta": {"images": [
+            {"type": "macho", "image_addr": "0xffffffffffffffff", "image_size": 2, "debug_id": "x"}]}});
+        assert!(super::macho_images(&ev).is_empty());
     }
 
     /// tests/fixtures/crash.dSYM.zip: `int crash_here(int x) {\n return x * 2; }` (crash.c), clang -g arm64.
