@@ -71,6 +71,12 @@ pub fn routes(st: AppState) -> Router<AppState> {
 
 async fn auth(State(st): State<AppState>, mut req: Request, next: Next) -> Response {
     match scope_from(&st, req.headers()).await {
+        // a frames token skips the fix-approval gate on REST, so it must never drive the fix flow.
+        Ok(s) if s.frames() => (
+            axum::http::StatusCode::FORBIDDEN,
+            "frames tokens cannot use MCP",
+        )
+            .into_response(),
         Ok(s) => {
             req.extensions_mut().insert(s);
             next.run(req).await

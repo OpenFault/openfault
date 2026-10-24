@@ -72,6 +72,10 @@ impl Scope {
     pub fn can_write(&self) -> bool {
         self.token.scopes.split([',', ' ']).any(|s| s == "write")
     }
+    /// A person's token that reads stack frames before fix approval; MCP refuses it.
+    pub fn frames(&self) -> bool {
+        self.token.scopes.split([',', ' ']).any(|s| s == "frames")
+    }
     pub fn writer(&self) -> Result<(), ApiErr> {
         if self.can_write() {
             Ok(())
@@ -335,8 +339,11 @@ async fn issue(
 
 const GATED: [&str; 4] = ["frames", "breadcrumbs", "request", "events"];
 
-/// A paired phone is a person, not an agent: it sees full details. Other tokens need fix approval.
+/// A paired phone or a `frames` token is a person, not an agent: full details. Other tokens need fix approval.
 async fn approved(st: &AppState, s: &Scope, issue_id: i64) -> R<bool> {
+    if s.frames() {
+        return Ok(true);
+    }
     let tid = s.token.id;
     let device: bool = st
         .db
@@ -485,8 +492,15 @@ async fn event(
     {
         e.raw = Value::Null;
     }
+    let iid = e.issue_id;
     let mut v = safe(e);
     v["untrusted"] = true.into();
+    if s.frames() {
+        v["fix_approved"] = issues::fix_approved(&st.db, iid)
+            .await
+            .map_err(internal)?
+            .into();
+    }
     Ok(Json(v))
 }
 
