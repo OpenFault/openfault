@@ -338,6 +338,24 @@ async fn actions_regression_mute_delete() {
     .await;
     assert!(g["fix_approved"] == false && g.get("raw").is_none() && g.get("request").is_none());
     assert!(g["exceptions"][0].get("frames").is_none());
+    // a person's frames token reads frames before approval; MCP refuses it.
+    let ft = "of_admin_frames";
+    let h = openfault::auth::hash_token(ft);
+    t.db.write(move |c| {
+        c.execute(
+            "INSERT INTO api_tokens (token_hash, user_id, scopes) VALUES (?1, 1, 'read,frames')",
+            [h],
+        )
+    })
+    .await
+    .unwrap();
+    let (_, g) = req(&t, "GET", &format!("/api/v1/events/{}", ev.id), ft, None).await;
+    assert!(
+        g["exceptions"][0]["frames"].is_array() && g["fix_approved"] == false,
+        "{g}"
+    );
+    let (s, _, _) = raw_req(&t, "POST", "/mcp", ft, Some("{}".into()), &[]).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
     post(json!({"action": "approve"})).await;
 
     // assign: only a visible member of the issue's project

@@ -13,7 +13,7 @@
 <thead><tr><th>Label</th><th>Scope</th><th>Project</th><th>Last used</th><th></th></tr></thead>
 <tbody>
 {% for t in tokens %}
-<tr><td><b>{{ t.label }}</b></td><td><span class="pill">{% if t.scopes == "write" %}Read &amp; write{% else if t.scopes == "read" %}Read only{% else %}{{ t.scopes }}{% endif %}</span></td><td class="muted">{{ t.project }}</td><td class="muted">{{ t.last_used }}</td>
+<tr><td><b>{{ t.label }}</b></td><td><span class="pill">{% if t.scopes == "write" %}Read &amp; write{% else if t.scopes == "read" %}Read only{% else if t.scopes == "read,frames" %}Read + stack frames{% else %}{{ t.scopes }}{% endif %}</span></td><td class="muted">{{ t.project }}</td><td class="muted">{{ t.last_used }}</td>
 <td class="num"><form method="post" action="/settings/tokens/{{ t.id }}/revoke" class="inline"><button class="ghost sm danger">Revoke</button></form></td></tr>
 {% endfor %}
 </tbody>
@@ -22,7 +22,7 @@
 <h2>New token</h2>
 <form method="post" action="/settings/tokens" class="stack">
   <label>Label <input name="label" required placeholder="claude-code"></label>
-  <label>Scope <select name="scope"><option value="read">Read only</option><option value="write" selected>Read &amp; write</option></select><span class="hint">Read &amp; write is needed for MCP actions like resolve, mute, link fix.</span></label>
+  <label>Scope <select name="scope"><option value="read">Read only</option><option value="write" selected>Read &amp; write</option><option value="frames">Read + stack frames before approval (no MCP)</option></select><span class="hint">Read &amp; write is needed for MCP actions like resolve, mute, link fix. Read + stack frames shows frames, breadcrumbs and requests on issues nobody has approved for fixing; it is for people and scripts, and MCP refuses it.</span></label>
   <label>Project <select name="project"><option value="">All my projects</option>{% for p in projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select></label>
   <button>Create token</button>
 </form>

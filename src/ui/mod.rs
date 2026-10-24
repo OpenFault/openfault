@@ -1777,7 +1777,11 @@ struct TokenForm {
 }
 
 async fn create_token(me: Me, State(st): State<AppState>, Form(f): Form<TokenForm>) -> R {
-    let scope = if f.scope == "write" { "write" } else { "read" };
+    let scope = match f.scope.as_str() {
+        "write" => "write",
+        "frames" => "read,frames",
+        _ => "read",
+    };
     let pid = match f.project.as_str() {
         "" => None,
         id => {
