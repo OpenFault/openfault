@@ -332,6 +332,11 @@ async fn limited_claim(
             ));
         }
     }
+    // App Review QR: a reusable code that takes the demo path; revoke by unsetting the env var.
+    let demo = demo
+        || std::env::var("OPENFAULT_DEMO_CODE").is_ok_and(|d| {
+            d.chars().any(|c| c.is_ascii_alphanumeric()) && code_hash(&d) == code_hash(&b.code)
+        });
     let code = (!demo).then_some(b.code.as_str());
     let r = claim(&st, code, &b.platform, &b.device_name, b.push_token).await;
     if matches!(r, Err(ApiErr(StatusCode::NOT_FOUND, _))) {

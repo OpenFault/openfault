@@ -223,4 +223,37 @@ async fn demo_pairing_gated_by_env() {
     let nocode = json!({"platform": "ios", "device_name": "x"}).to_string();
     let (s, _) = req(&t, "POST", "/api/v1/pair/claim", "", Some(nocode)).await;
     assert_eq!(s, StatusCode::NOT_FOUND);
+    unsafe { std::env::set_var("OPENFAULT_DEMO_USER", "m@x.io") };
+    // OPENFAULT_DEMO_CODE: reusable via /pair/claim, each claim its own token; other codes still 404.
+    unsafe { std::env::set_var("OPENFAULT_DEMO_CODE", "REVW2345") };
+    let claim =
+        |code: &str| json!({"code": code, "platform": "ios", "device_name": "R"}).to_string();
+    let mut toks = vec![];
+    for code in ["revw-2345", "REVW2345"] {
+        let (st, r) = req(&t, "POST", "/api/v1/pair/claim", "", Some(claim(code))).await;
+        assert_eq!(st, StatusCode::OK, "{r}");
+        assert_eq!(r["user"]["email"], "m@x.io");
+        toks.push(r["token"].as_str().unwrap().to_string());
+    }
+    assert_ne!(toks[0], toks[1]);
+    let (s2, _) = req(
+        &t,
+        "POST",
+        "/api/v1/pair/claim",
+        "",
+        Some(claim("REVW2346")),
+    )
+    .await;
+    assert_eq!(s2, StatusCode::NOT_FOUND);
+    unsafe { std::env::remove_var("OPENFAULT_DEMO_CODE") };
+    let (s2, _) = req(
+        &t,
+        "POST",
+        "/api/v1/pair/claim",
+        "",
+        Some(claim("REVW2345")),
+    )
+    .await;
+    assert_eq!(s2, StatusCode::NOT_FOUND);
+    unsafe { std::env::remove_var("OPENFAULT_DEMO_USER") };
 }
