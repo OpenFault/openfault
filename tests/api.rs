@@ -470,7 +470,25 @@ async fn stats_releases_me() {
             "zero-filled"
         );
         assert_eq!(v["top_issues"].as_array().unwrap().len(), 3);
+        assert_eq!(v["prev_total_received"], 0, "{range}");
     }
+    // a row 40 days back sits in no current window; one ~36h back is only in day's previous window.
+    t.db.write(|c| {
+        c.execute(
+            "INSERT INTO project_hourly (project_id, hour_ts, received) SELECT id, (unixepoch() / 3600 - 36) * 3600, 5 FROM projects WHERE slug = 'dev'",
+            [],
+        )
+    })
+    .await
+    .unwrap();
+    let (_, v) = req(&t, "GET", "/api/v1/stats?range=day", ADMIN_R, None).await;
+    assert_eq!(
+        (
+            v["total_received"].as_i64(),
+            v["prev_total_received"].as_i64()
+        ),
+        (Some(received), Some(5))
+    );
     assert_eq!(
         req(&t, "GET", "/api/v1/stats?range=year", ADMIN_R, None)
             .await

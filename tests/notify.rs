@@ -171,6 +171,7 @@ async fn pipeline_email_webhook_push_dedupe_prefs() {
     assert_eq!(relays[0].2["collapse_id"], format!("issue-{issue}"));
     assert_eq!(relays[0].2["category"], "ISSUE");
     assert_eq!(relays[0].2["thread_id"], issue.to_string());
+    assert_eq!(relays[0].2["interruption_level"], "active");
     // 410 from the relay deletes the device.
     assert_eq!(q(&t.db, "SELECT count(*) FROM devices").await, 1);
     let log = notify::recent_deliveries(&t.db, 1, 10).await.unwrap();
@@ -212,6 +213,10 @@ async fn pipeline_email_webhook_push_dedupe_prefs() {
     assert!(
         s.iter()
             .any(|x| x.0 == "hook" && x.2["kind"] == "regression")
+    );
+    assert!(
+        s.iter()
+            .any(|x| x.0 == "relay" && x.2["interruption_level"] == "time-sensitive")
     );
     assert!(
         s.iter()

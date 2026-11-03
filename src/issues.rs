@@ -962,6 +962,8 @@ pub struct Stats {
     pub top_issues: Vec<IssueRow>,
     pub total_received: i64,
     pub total_dropped: i64,
+    /// received in the equal-length period before `start`, for "+4% vs previous" deltas
+    pub prev_total_received: i64,
 }
 
 pub async fn stats(db: &Db, project_ids: &[i64], range: Range) -> anyhow::Result<Stats> {
@@ -979,9 +981,10 @@ pub async fn stats(db: &Db, project_ids: &[i64], range: Range) -> anyhow::Result
         };
         list_issues(db, &f).await?.0
     };
-    let (per_project, total_received, total_dropped) = db
+    let prev_start = start - n * step;
+    let (per_project, total_received, total_dropped, prev_total_received) = db
         .read(move |c| {
-            let (mut tr, mut td) = (0, 0);
+            let (mut tr, mut td, mut pr) = (0, 0, 0);
             let mut out = vec![];
             for pid in ids {
                 let Some((slug, name)) =
@@ -1001,6 +1004,11 @@ pub async fn stats(db: &Db, project_ids: &[i64], range: Range) -> anyhow::Result
                     }
                 }
                 let q = |sql: &str| -> rusqlite::Result<i64> { c.query_row(sql, params![pid, start], |r| r.get(0)) };
+                pr += c.query_row(
+                    "SELECT coalesce(sum(received), 0) FROM project_hourly WHERE project_id = ?1 AND hour_ts >= ?2 AND hour_ts < ?3",
+                    params![pid, prev_start, start],
+                    |r| r.get::<_, i64>(0),
+                )?;
                 let unresolved: i64 = c.query_row("SELECT count(*) FROM issues WHERE project_id = ?1 AND status = 'unresolved'", [pid], |r| r.get(0))?;
                 out.push(ProjectSeries {
                     project_id: pid,
@@ -1015,7 +1023,7 @@ pub async fn stats(db: &Db, project_ids: &[i64], range: Range) -> anyhow::Result
                     )?,
                 });
             }
-            Ok((out, tr, td))
+            Ok((out, tr, td, pr))
         })
         .await?;
     Ok(Stats {
@@ -1023,6 +1031,7 @@ pub async fn stats(db: &Db, project_ids: &[i64], range: Range) -> anyhow::Result
         top_issues: top,
         total_received,
         total_dropped,
+        prev_total_received,
     })
 }
 

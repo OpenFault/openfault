@@ -47,6 +47,8 @@ pub async fn send(r: &Relay, i: &Info, tokens: &[String]) -> Result<Vec<TokenRes
         "collapse_id": format!("issue-{}", i.id),
         "category": "ISSUE",
         "thread_id": i.id.to_string(),
+        // regressions and spikes break through Focus; old relays ignore the key.
+        "interruption_level": if matches!(i.kind.as_str(), "regression" | "spike") { "time-sensitive" } else { "active" },
     });
     let res = HTTP
         .post(format!("{}/v1/push", r.url))

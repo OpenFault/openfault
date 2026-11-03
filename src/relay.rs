@@ -117,6 +117,8 @@ struct PushReq {
     category: Option<String>,
     /// Groups notifications per issue in Notification Center; falls back to collapse_id.
     thread_id: Option<String>,
+    /// APNs interruption-level ("active" | "time-sensitive"); omitted for old servers.
+    interruption_level: Option<String>,
 }
 
 /// APNs header-safe: printable ASCII, ≤64.
@@ -128,6 +130,9 @@ fn payload(r: &PushReq) -> String {
     let mut aps = json!({"alert": {"title": trunc(&r.title, 200), "body": trunc(&r.body, 400)}, "sound": "default"});
     if let Some(t) = r.thread_id.as_ref().or(r.collapse_id.as_ref()) {
         aps["thread-id"] = ascii64(t).into();
+    }
+    if let Some(l) = &r.interruption_level {
+        aps["interruption-level"] = ascii64(l).into();
     }
     if let Some(c) = &r.category {
         aps["category"] = ascii64(c).into();
@@ -247,11 +252,13 @@ mod tests {
         let r: PushReq = serde_json::from_value(json!({
             "tokens": [], "title": "t", "body": "b", "url": "/issues/7",
             "collapse_id": "issue-7", "category": "ISSUE", "thread_id": "7", "badge": 2,
+            "interruption_level": "time-sensitive",
         }))
         .unwrap();
         let v: serde_json::Value = serde_json::from_str(&payload(&r)).unwrap();
         assert_eq!(v["aps"]["category"], "ISSUE");
         assert_eq!(v["aps"]["thread-id"], "7");
+        assert_eq!(v["aps"]["interruption-level"], "time-sensitive");
         assert_eq!(v["aps"]["badge"], 2);
         assert_eq!(v["url"], "/issues/7");
         // old servers: no category, thread-id falls back to collapse_id
@@ -261,6 +268,7 @@ mod tests {
         .unwrap();
         let v: serde_json::Value = serde_json::from_str(&payload(&r)).unwrap();
         assert!(v["aps"].get("category").is_none());
+        assert!(v["aps"].get("interruption-level").is_none());
         assert_eq!(v["aps"]["thread-id"], "issue-7");
     }
 
