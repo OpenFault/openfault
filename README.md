@@ -12,6 +12,7 @@
   <a href="https://github.com/OpenFault/openfault/actions/workflows/ci.yml"><img src="https://github.com/OpenFault/openfault/actions/workflows/ci.yml/badge.svg" alt="Build status"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-black" alt="MIT license"></a>
   <a href="https://github.com/OpenFault/openfault/pkgs/container/openfault"><img src="https://img.shields.io/badge/ghcr.io-openfault%2Fopenfault-black" alt="Docker image"></a>
+  <a href="https://glama.ai/mcp/servers/OpenFault/openfault"><img src="https://glama.ai/mcp/servers/OpenFault/openfault/badges/score.svg" alt="OpenFault/openfault MCP server"></a>
 </p>
 
 <p align="center">
